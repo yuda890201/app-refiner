@@ -1,1 +1,1486 @@
-<!DOCTYPE html><html lang="ja"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>App Refiner（ブラッシュアップ司令塔）</title><script src="https://cdn.tailwindcss.com"></script></head><body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col font-sans"><header class="bg-gradient-to-r from-indigo-600 to-blue-600 p-4 text-white shadow sticky top-0 z-20"><div class="max-w-md mx-auto flex justify-between items-center"><h1 class="font-bold text-base">App Refiner（ブラッシュアップ司令塔）</h1><span class="text-[10px] bg-black/30 px-2 py-0.5 rounded-full font-mono">Live</span></div></header><main class="flex-1 p-4 max-w-md w-full mx-auto space-y-4"><div id="toast" class="p-3 bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 rounded-xl text-xs font-semibold" style="display:none;">送信完了: データが保存されました！</div><form onsubmit="event.preventDefault(); document.getElementById('toast').style.display='block'; this.reset(); setTimeout(()=>document.getElementById('toast').style.display='none',3000);" class="space-y-3.5 bg-slate-900/90 border border-slate-800 p-4 rounded-2xl shadow-xl"><div class="space-y-1"><label class="text-[11px] font-semibold text-slate-300">対象アプリ</label><input type="text" name="target_app" placeholder="アプリ名またはリポジトリ名" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white text-xs"></div><div class="space-y-1"><label class="text-[11px] font-semibold text-slate-300">改修の種類</label><select name="refine_type" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white text-xs"><option value="UI改善">UI改善</option><option value="機能追加">機能追加</option><option value="不具合修正">不具合修正</option><option value="リファクタ">リファクタ</option></select></div><div class="space-y-1"><label class="text-[11px] font-semibold text-slate-300">優先度</label><select name="priority" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white text-xs"><option value="高">高</option><option value="中">中</option><option value="低">低</option></select></div><div class="space-y-1"><label class="text-[11px] font-semibold text-slate-300">改修要望本文</label><textarea name="requirements" rows="3" placeholder="具体的な改修内容を入力してください" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white text-xs"></textarea></div><button type="submit" class="w-full py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl shadow text-xs mt-3">データを記録・送信する</button></form></main></body></html>
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#4338ca">
+<meta name="description" content="自作アプリの改修要望を、Gemini / @App Studio にそのまま渡せる改修指示書テキストへ変換するスマホ向け司令塔アプリ。">
+<title>App Refiner（ブラッシュアップ司令塔）</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+<style>
+  :root { color-scheme: dark; }
+  body { -webkit-tap-highlight-color: transparent; }
+  .safe-b { padding-bottom: calc(env(safe-area-inset-bottom, 0px)); }
+  /* カード内 iframe プレビュー：実機幅 390px で描画したものを縮小表示する */
+  .preview-box { position: relative; overflow: hidden; background: #020617; }
+  .preview-box iframe {
+    position: absolute; top: 0; left: 0;
+    width: 390px; height: 720px; border: 0;
+    transform-origin: 0 0;
+    opacity: 0; transition: opacity .35s ease;
+    pointer-events: none; /* カード全体のタップを邪魔しない */
+  }
+  .preview-box iframe.is-ready { opacity: 1; }
+  .preview-fallback { position: absolute; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: .35rem; color: #64748b; font-size: 11px; }
+  .line-clamp-2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .line-clamp-3 { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+  textarea, input, select, button { font-family: inherit; }
+  /* iOS のズーム回避のため入力系は 16px を確保 */
+  input, textarea, select { font-size: 16px !important; }
+  .scroll-x { -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+  .scroll-x::-webkit-scrollbar { display: none; }
+  #outputText { white-space: pre-wrap; word-break: break-word; }
+  dialog::backdrop { background: rgba(2, 6, 23, .78); }
+</style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen font-sans antialiased">
+
+<header class="sticky top-0 z-30 bg-gradient-to-r from-indigo-700 via-indigo-600 to-blue-600 shadow-lg">
+  <div class="max-w-md mx-auto px-4 py-3 flex items-center justify-between gap-2">
+    <div class="min-w-0">
+      <h1 class="font-bold text-sm leading-tight truncate">App Refiner</h1>
+      <p class="text-[10px] text-indigo-100/80 leading-tight">ブラッシュアップ司令塔</p>
+    </div>
+    <div class="flex items-center gap-2 shrink-0">
+      <span class="text-[10px] bg-black/25 px-2 py-0.5 rounded-full font-mono">Live</span>
+      <button id="btnSettings" type="button" aria-label="設定"
+        class="w-9 h-9 rounded-full bg-black/25 active:bg-black/40 flex items-center justify-center">
+        <i class="fa-solid fa-gear text-sm"></i>
+      </button>
+    </div>
+  </div>
+</header>
+
+<div id="storageWarn" class="max-w-md mx-auto px-4 pt-3" hidden>
+  <p class="text-[11px] bg-amber-500/15 border border-amber-500/40 text-amber-200 rounded-xl px-3 py-2">
+    <i class="fa-solid fa-triangle-exclamation mr-1"></i>
+    この環境では保存領域（localStorage）が使えません。データはこのタブを閉じるまでの一時保持になります。
+  </p>
+</div>
+
+<main class="max-w-md mx-auto px-4 pt-4 pb-28 space-y-4">
+
+  <!-- ===== ステップ1：対象アプリの管理 ===== -->
+  <section id="tab-apps" class="space-y-3.5">
+    <div class="flex items-center justify-between gap-2">
+      <div class="flex items-center gap-2">
+        <span class="text-[10px] font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 px-2 py-0.5 rounded-full">STEP 1</span>
+        <h2 class="text-sm font-bold">対象アプリ</h2>
+      </div>
+      <button id="btnAddApp" type="button"
+        class="text-[11px] font-bold bg-indigo-600 active:bg-indigo-500 px-3 py-1.5 rounded-lg shadow">
+        <i class="fa-solid fa-plus mr-1"></i>アプリを追加
+      </button>
+    </div>
+    <p class="text-[11px] text-slate-400 leading-relaxed">
+      カードをタップすると改修対象として選択されます。プレビューは各アプリの公開URLを縮小表示したものです。
+    </p>
+    <div id="appList" class="space-y-3"></div>
+  </section>
+
+  <!-- ===== ステップ2・3：改修要望の入力と指示書生成 ===== -->
+  <section id="tab-compose" class="space-y-3.5" hidden>
+    <div class="flex items-center gap-2">
+      <span class="text-[10px] font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 px-2 py-0.5 rounded-full">STEP 2</span>
+      <h2 class="text-sm font-bold">改修要望の入力</h2>
+    </div>
+
+    <div id="composeTarget"></div>
+
+    <div class="bg-slate-900/80 border border-slate-800 rounded-2xl p-3.5 space-y-2.5">
+      <p class="text-[11px] font-semibold text-slate-300">
+        <i class="fa-solid fa-wand-magic-sparkles mr-1 text-indigo-400"></i>クイックプリセット
+      </p>
+      <div id="presetList" class="flex flex-wrap gap-2"></div>
+    </div>
+
+    <div class="bg-slate-900/80 border border-slate-800 rounded-2xl p-3.5 space-y-2">
+      <div class="flex items-center justify-between">
+        <label for="reqBody" class="text-[11px] font-semibold text-slate-300">改修要望（自由記述）</label>
+        <button id="btnClearBody" type="button" class="text-[10px] text-slate-400 active:text-slate-200">
+          <i class="fa-regular fa-trash-can mr-1"></i>クリア
+        </button>
+      </div>
+      <textarea id="reqBody" rows="7" placeholder="例）ホーム画面の文字が小さいので、片手で読めるサイズに調整してほしい。"
+        class="w-full bg-slate-950 border border-slate-700 focus:border-indigo-500 outline-none rounded-xl p-3 text-slate-100 leading-relaxed resize-y"></textarea>
+      <p id="reqCount" class="text-[10px] text-slate-500 text-right">0 文字</p>
+    </div>
+
+    <div class="grid grid-cols-2 gap-3">
+      <div class="bg-slate-900/80 border border-slate-800 rounded-2xl p-3.5 space-y-1.5">
+        <label for="reqType" class="text-[11px] font-semibold text-slate-300">改修の種類</label>
+        <select id="reqType" class="w-full bg-slate-950 border border-slate-700 focus:border-indigo-500 outline-none rounded-xl p-2.5 text-slate-100"></select>
+      </div>
+      <div class="bg-slate-900/80 border border-slate-800 rounded-2xl p-3.5 space-y-1.5">
+        <label for="reqPriority" class="text-[11px] font-semibold text-slate-300">優先度</label>
+        <select id="reqPriority" class="w-full bg-slate-950 border border-slate-700 focus:border-indigo-500 outline-none rounded-xl p-2.5 text-slate-100"></select>
+      </div>
+    </div>
+
+    <button id="btnGenerate" type="button"
+      class="w-full py-3.5 bg-indigo-600 active:bg-indigo-500 disabled:opacity-40 disabled:active:bg-indigo-600 font-bold rounded-2xl shadow-lg text-sm">
+      <i class="fa-solid fa-file-lines mr-1.5"></i>指示書を生成
+    </button>
+
+    <div id="outputWrap" class="space-y-3 pt-1" hidden>
+      <div class="flex items-center gap-2">
+        <span class="text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 px-2 py-0.5 rounded-full">STEP 3</span>
+        <h2 class="text-sm font-bold">生成された指示書</h2>
+      </div>
+      <pre id="outputText" class="bg-slate-900 border border-slate-800 rounded-2xl p-3.5 text-[11px] leading-relaxed text-slate-200 max-h-80 overflow-auto"></pre>
+      <div class="grid grid-cols-3 gap-2">
+        <button id="btnCopy" type="button"
+          class="col-span-2 py-3 bg-emerald-600 active:bg-emerald-500 font-bold rounded-xl shadow text-sm">
+          <i class="fa-regular fa-copy mr-1.5"></i>コピー
+        </button>
+        <button id="btnSaveOnly" type="button"
+          class="py-3 bg-slate-800 active:bg-slate-700 border border-slate-700 font-bold rounded-xl text-[11px]">
+          <i class="fa-regular fa-bookmark mr-1"></i>履歴に保存
+        </button>
+      </div>
+      <p class="text-[10px] text-slate-500 leading-relaxed">
+        コピーした指示書は自動的に履歴へ保存されます。Gemini や @App Studio にそのまま貼り付けてください。
+      </p>
+    </div>
+  </section>
+
+  <!-- ===== ステップ4：履歴 ===== -->
+  <section id="tab-history" class="space-y-3.5" hidden>
+    <div class="flex items-center justify-between gap-2">
+      <div class="flex items-center gap-2">
+        <span class="text-[10px] font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 px-2 py-0.5 rounded-full">STEP 4</span>
+        <h2 class="text-sm font-bold">依頼履歴</h2>
+      </div>
+      <button id="btnClearHistory" type="button"
+        class="text-[11px] font-bold bg-slate-800 active:bg-slate-700 border border-slate-700 px-3 py-1.5 rounded-lg">
+        <i class="fa-regular fa-trash-can mr-1"></i>全削除
+      </button>
+    </div>
+    <div id="historyFilter" class="flex gap-2 overflow-x-auto scroll-x pb-1"></div>
+    <div id="historyList" class="space-y-3"></div>
+  </section>
+
+</main>
+
+<!-- ===== ボトムナビ ===== -->
+<nav class="fixed bottom-0 inset-x-0 z-30 bg-slate-900/95 backdrop-blur border-t border-slate-800 safe-b">
+  <div class="max-w-md mx-auto grid grid-cols-3">
+    <button type="button" data-tab="tab-apps" class="nav-btn py-2.5 flex flex-col items-center gap-0.5 text-[10px] font-semibold">
+      <i class="fa-solid fa-layer-group text-base"></i><span>アプリ</span>
+    </button>
+    <button type="button" data-tab="tab-compose" class="nav-btn py-2.5 flex flex-col items-center gap-0.5 text-[10px] font-semibold">
+      <i class="fa-solid fa-pen-to-square text-base"></i><span>指示書</span>
+    </button>
+    <button type="button" data-tab="tab-history" class="nav-btn py-2.5 flex flex-col items-center gap-0.5 text-[10px] font-semibold relative">
+      <i class="fa-solid fa-clock-rotate-left text-base"></i><span>履歴</span>
+      <span id="historyBadge" class="absolute top-1 right-1/2 translate-x-6 bg-indigo-500 text-[9px] font-bold px-1.5 rounded-full" hidden>0</span>
+    </button>
+  </div>
+</nav>
+
+<!-- ===== トースト ===== -->
+<div id="toast" class="fixed left-1/2 -translate-x-1/2 bottom-24 z-50 px-4 py-2.5 rounded-xl text-xs font-semibold shadow-2xl border transition-all duration-200 opacity-0 translate-y-2 pointer-events-none"></div>
+
+<!-- ===== アプリ編集モーダル ===== -->
+<div id="appModal" class="fixed inset-0 z-40 bg-slate-950/85 backdrop-blur-sm overflow-y-auto" hidden>
+  <div class="min-h-full flex items-end sm:items-center justify-center p-3">
+    <div class="w-full max-w-md bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl p-4 space-y-3">
+      <div class="flex items-center justify-between">
+        <h3 id="appModalTitle" class="text-sm font-bold">アプリを追加</h3>
+        <button type="button" data-close="appModal" aria-label="閉じる" class="w-8 h-8 rounded-full bg-slate-800 active:bg-slate-700">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+      <div class="space-y-1">
+        <label for="appName" class="text-[11px] font-semibold text-slate-300">アプリ名 <span class="text-rose-400">*</span></label>
+        <input id="appName" type="text" placeholder="App Refiner"
+          class="w-full bg-slate-950 border border-slate-700 focus:border-indigo-500 outline-none rounded-xl p-2.5 text-slate-100">
+      </div>
+      <div class="space-y-1">
+        <label for="appRepo" class="text-[11px] font-semibold text-slate-300">リポジトリ名</label>
+        <input id="appRepo" type="text" inputmode="url" autocapitalize="none" placeholder="app-refiner"
+          class="w-full bg-slate-950 border border-slate-700 focus:border-indigo-500 outline-none rounded-xl p-2.5 text-slate-100">
+      </div>
+      <div class="space-y-1">
+        <label for="appUrl" class="text-[11px] font-semibold text-slate-300">公開URL</label>
+        <input id="appUrl" type="url" inputmode="url" autocapitalize="none" placeholder="https://yuda890201.github.io/app-refiner/"
+          class="w-full bg-slate-950 border border-slate-700 focus:border-indigo-500 outline-none rounded-xl p-2.5 text-slate-100">
+        <p class="text-[10px] text-slate-500">リポジトリ名を入れると自動で候補が入ります。</p>
+      </div>
+      <div class="space-y-1">
+        <label for="appMemo" class="text-[11px] font-semibold text-slate-300">メモ</label>
+        <textarea id="appMemo" rows="2" placeholder="どんなアプリか / 次にやりたいこと"
+          class="w-full bg-slate-950 border border-slate-700 focus:border-indigo-500 outline-none rounded-xl p-2.5 text-slate-100 resize-y"></textarea>
+      </div>
+      <div class="grid grid-cols-2 gap-2 pt-1">
+        <button type="button" data-close="appModal" class="py-3 bg-slate-800 active:bg-slate-700 border border-slate-700 rounded-xl font-bold text-sm">キャンセル</button>
+        <button id="btnSaveApp" type="button" class="py-3 bg-indigo-600 active:bg-indigo-500 rounded-xl font-bold text-sm">保存</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== 設定モーダル ===== -->
+<div id="settingsModal" class="fixed inset-0 z-40 bg-slate-950/85 backdrop-blur-sm overflow-y-auto" hidden>
+  <div class="min-h-full flex items-end sm:items-center justify-center p-3">
+    <div class="w-full max-w-md bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl p-4 space-y-4">
+      <div class="flex items-center justify-between">
+        <h3 class="text-sm font-bold"><i class="fa-solid fa-gear mr-1.5 text-indigo-400"></i>設定 / データ管理</h3>
+        <button type="button" data-close="settingsModal" aria-label="閉じる" class="w-8 h-8 rounded-full bg-slate-800 active:bg-slate-700">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+
+      <p id="statsLine" class="text-[11px] text-slate-400"></p>
+
+      <div class="space-y-2">
+        <p class="text-[11px] font-semibold text-slate-300"><i class="fa-solid fa-file-export mr-1"></i>エクスポート</p>
+        <div class="grid grid-cols-2 gap-2">
+          <button id="btnExportFile" type="button" class="py-2.5 bg-indigo-600 active:bg-indigo-500 rounded-xl font-bold text-[11px]">
+            <i class="fa-solid fa-download mr-1"></i>JSONを保存
+          </button>
+          <button id="btnExportCopy" type="button" class="py-2.5 bg-slate-800 active:bg-slate-700 border border-slate-700 rounded-xl font-bold text-[11px]">
+            <i class="fa-regular fa-copy mr-1"></i>JSONをコピー
+          </button>
+        </div>
+        <textarea id="exportText" rows="4" readonly placeholder="「JSONを保存」または「JSONをコピー」を押すとここに内容が表示されます。"
+          class="w-full bg-slate-950 border border-slate-700 rounded-xl p-2.5 text-slate-300 text-[11px] resize-y"></textarea>
+      </div>
+
+      <div class="space-y-2 border-t border-slate-800 pt-3">
+        <p class="text-[11px] font-semibold text-slate-300"><i class="fa-solid fa-file-import mr-1"></i>インポート</p>
+        <input id="importFile" type="file" accept="application/json,.json"
+          class="w-full text-[11px] text-slate-400 file:mr-2 file:py-2 file:px-3 file:rounded-lg file:border-0 file:bg-slate-800 file:text-slate-200 file:font-bold">
+        <textarea id="importText" rows="4" placeholder="バックアップJSONを直接貼り付けることもできます。"
+          class="w-full bg-slate-950 border border-slate-700 focus:border-indigo-500 outline-none rounded-xl p-2.5 text-slate-100 text-[11px] resize-y"></textarea>
+        <div class="grid grid-cols-2 gap-2">
+          <button id="btnImportMerge" type="button" class="py-2.5 bg-slate-800 active:bg-slate-700 border border-slate-700 rounded-xl font-bold text-[11px]">
+            <i class="fa-solid fa-code-merge mr-1"></i>追加（マージ）
+          </button>
+          <button id="btnImportReplace" type="button" class="py-2.5 bg-rose-600/90 active:bg-rose-500 rounded-xl font-bold text-[11px]">
+            <i class="fa-solid fa-rotate mr-1"></i>置き換え
+          </button>
+        </div>
+      </div>
+
+      <div class="border-t border-slate-800 pt-3 space-y-2">
+        <button id="btnResetAll" type="button" class="w-full py-2.5 bg-slate-800 active:bg-rose-600/40 border border-rose-500/40 text-rose-300 rounded-xl font-bold text-[11px]">
+          <i class="fa-solid fa-triangle-exclamation mr-1"></i>すべてのデータを初期状態に戻す
+        </button>
+        <p class="text-[10px] text-slate-500 leading-relaxed">
+          このアプリは外部通信を行いません。データはこの端末のブラウザ（localStorage）にのみ保存されます。
+        </p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== 確認ダイアログ ===== -->
+<div id="confirmModal" class="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-sm" hidden>
+  <div class="min-h-full flex items-center justify-center p-5">
+    <div class="w-full max-w-xs bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl p-4 space-y-3">
+      <h3 id="confirmTitle" class="text-sm font-bold"></h3>
+      <p id="confirmMessage" class="text-[11px] text-slate-300 leading-relaxed"></p>
+      <div class="grid grid-cols-2 gap-2 pt-1">
+        <button id="confirmCancel" type="button" class="py-2.5 bg-slate-800 active:bg-slate-700 border border-slate-700 rounded-xl font-bold text-[11px]">キャンセル</button>
+        <button id="confirmOk" type="button" class="py-2.5 bg-rose-600 active:bg-rose-500 rounded-xl font-bold text-[11px]">削除する</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  /* =========================================================
+   * 定数
+   * =======================================================*/
+  var LS_KEY = 'app-refiner.v1';
+  var GH_USER = 'yuda890201';
+  var TYPES = ['機能追加', '不具合修正', 'UI改善', 'リファクタ'];
+  var PRIORITIES = ['高', '中', '低'];
+  var PRESETS = [
+    'UI/UXを改善', 'スマホ最適化', '音声読み上げを追加', '入力履歴を保存',
+    'バグ修正', '文言をわかりやすく', '表示速度を改善'
+  ];
+  var DEFAULT_APPS = [
+    {
+      id: 'app_store_trouble_report',
+      name: 'Store Trouble Report',
+      repo: 'store-trouble-report',
+      url: 'https://' + GH_USER + '.github.io/store-trouble-report/',
+      memo: '店舗トラブル報告フォーム。'
+    },
+    {
+      id: 'app_my_instant_app',
+      name: 'My Instant App',
+      repo: 'my-instant-app',
+      url: 'https://' + GH_USER + '.github.io/my-instant-app/',
+      memo: 'App Studio で最初に作成したアプリ。'
+    },
+    {
+      id: 'app_app_studio_e2e_test',
+      name: 'App Studio E2E Test',
+      repo: 'app-studio-e2e-test',
+      url: 'https://' + GH_USER + '.github.io/app-studio-e2e-test/',
+      memo: 'App Studio の動作確認用。'
+    }
+  ];
+
+  /* =========================================================
+   * 小さなユーティリティ
+   * =======================================================*/
+  function $(sel, root) { return (root || document).querySelector(sel); }
+  function $$(sel, root) {
+    return Array.prototype.slice.call((root || document).querySelectorAll(sel));
+  }
+  function esc(v) {
+    return String(v == null ? '' : v).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+  function uid(prefix) {
+    return (prefix || 'id') + '_' + Date.now().toString(36) + '_' +
+      Math.random().toString(36).slice(2, 8);
+  }
+  function isHttpUrl(v) { return /^https?:\/\//i.test(String(v || '').trim()); }
+  function fmtDate(iso) {
+    try {
+      var d = new Date(iso);
+      if (isNaN(d.getTime())) return String(iso || '');
+      var p = function (n) { return ('0' + n).slice(-2); };
+      return d.getFullYear() + '/' + p(d.getMonth() + 1) + '/' + p(d.getDate()) +
+        ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
+    } catch (e) { return String(iso || ''); }
+  }
+
+  /* =========================================================
+   * 状態とストレージ（読み書きは必ず try/catch）
+   * =======================================================*/
+  var storageOk = true;
+  var state = {
+    apps: [],
+    history: [],
+    selectedId: '',
+    draft: { type: 'UI改善', priority: '中', body: '' },
+    filter: 'all'
+  };
+  var lastOutput = '';
+  var lastSavedHistoryId = '';
+  var editingAppId = '';
+  var previewObserver = null;
+
+  function normalizeApp(a) {
+    a = a || {};
+    var name = String(a.name == null ? '' : a.name).trim();
+    return {
+      id: a.id ? String(a.id) : uid('app'),
+      name: name || '名称未設定アプリ',
+      repo: String(a.repo == null ? '' : a.repo).trim(),
+      url: String(a.url == null ? '' : a.url).trim(),
+      memo: String(a.memo == null ? '' : a.memo)
+    };
+  }
+  function normalizeHistory(h) {
+    h = h || {};
+    var type = TYPES.indexOf(h.type) >= 0 ? h.type : TYPES[0];
+    var priority = PRIORITIES.indexOf(h.priority) >= 0 ? h.priority : '中';
+    var item = {
+      id: h.id ? String(h.id) : uid('his'),
+      at: h.at ? String(h.at) : new Date().toISOString(),
+      appId: String(h.appId == null ? '' : h.appId),
+      appName: String(h.appName == null ? '' : h.appName) || '(アプリ名未設定)',
+      repo: String(h.repo == null ? '' : h.repo),
+      url: String(h.url == null ? '' : h.url),
+      type: type,
+      priority: priority,
+      body: String(h.body == null ? '' : h.body),
+      text: String(h.text == null ? '' : h.text),
+      done: !!h.done
+    };
+    if (!item.text) {
+      item.text = buildInstruction(
+        { name: item.appName, repo: item.repo, url: item.url },
+        item.type, item.priority, item.body
+      );
+    }
+    return item;
+  }
+
+  function seed() {
+    return {
+      apps: DEFAULT_APPS.map(normalizeApp),
+      history: [],
+      selectedId: DEFAULT_APPS[0].id,
+      draft: { type: 'UI改善', priority: '中', body: '' },
+      filter: 'all'
+    };
+  }
+
+  function loadState() {
+    var raw = null;
+    try {
+      raw = window.localStorage.getItem(LS_KEY);
+    } catch (e) {
+      storageOk = false;
+      return seed();
+    }
+    if (!raw) return seed();
+    try {
+      var parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== 'object') return seed();
+      var apps = Array.isArray(parsed.apps) ? parsed.apps.map(normalizeApp) : [];
+      var history = Array.isArray(parsed.history) ? parsed.history.map(normalizeHistory) : [];
+      var draft = parsed.draft && typeof parsed.draft === 'object' ? parsed.draft : {};
+      return {
+        apps: apps,
+        history: history,
+        selectedId: parsed.selectedId && apps.some(function (a) { return a.id === parsed.selectedId; })
+          ? String(parsed.selectedId)
+          : (apps.length ? apps[0].id : ''),
+        draft: {
+          type: TYPES.indexOf(draft.type) >= 0 ? draft.type : 'UI改善',
+          priority: PRIORITIES.indexOf(draft.priority) >= 0 ? draft.priority : '中',
+          body: String(draft.body == null ? '' : draft.body)
+        },
+        filter: ['all', 'open', 'done'].indexOf(parsed.filter) >= 0 ? parsed.filter : 'all'
+      };
+    } catch (e) {
+      return seed();
+    }
+  }
+
+  function saveState() {
+    if (!storageOk) return false;
+    try {
+      window.localStorage.setItem(LS_KEY, JSON.stringify({
+        version: 1,
+        savedAt: new Date().toISOString(),
+        apps: state.apps,
+        history: state.history,
+        selectedId: state.selectedId,
+        draft: state.draft,
+        filter: state.filter
+      }));
+      return true;
+    } catch (e) {
+      storageOk = false;
+      var warn = $('#storageWarn');
+      if (warn) warn.hidden = false;
+      toast('保存に失敗しました（保存領域の上限または制限）', 'warn');
+      return false;
+    }
+  }
+
+  /* =========================================================
+   * トースト
+   * =======================================================*/
+  var toastTimer = null;
+  var TOAST_STYLE = {
+    ok: 'bg-emerald-500/20 border-emerald-500/50 text-emerald-200',
+    warn: 'bg-amber-500/20 border-amber-500/50 text-amber-200',
+    err: 'bg-rose-500/20 border-rose-500/50 text-rose-200'
+  };
+  function toast(message, kind) {
+    var el = $('#toast');
+    if (!el) return;
+    var style = TOAST_STYLE[kind] || TOAST_STYLE.ok;
+    var icon = kind === 'warn' ? 'fa-triangle-exclamation'
+      : kind === 'err' ? 'fa-circle-xmark' : 'fa-circle-check';
+    el.className = 'fixed left-1/2 -translate-x-1/2 bottom-24 z-50 px-4 py-2.5 rounded-xl text-xs ' +
+      'font-semibold shadow-2xl border transition-all duration-200 ' + style;
+    el.innerHTML = '<i class="fa-solid ' + icon + ' mr-1.5"></i>' + esc(message);
+    el.style.opacity = '1';
+    el.style.transform = 'translate(-50%, 0)';
+    if (toastTimer) clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () {
+      el.style.opacity = '0';
+      el.style.transform = 'translate(-50%, 8px)';
+    }, 2600);
+  }
+
+  /* =========================================================
+   * 確認ダイアログ
+   * =======================================================*/
+  var confirmResolve = null;
+  function askConfirm(title, message, okLabel) {
+    $('#confirmTitle').textContent = title;
+    $('#confirmMessage').textContent = message;
+    $('#confirmOk').textContent = okLabel || '削除する';
+    $('#confirmModal').hidden = false;
+    return new Promise(function (resolve) { confirmResolve = resolve; });
+  }
+  function closeConfirm(result) {
+    $('#confirmModal').hidden = true;
+    if (confirmResolve) { var r = confirmResolve; confirmResolve = null; r(result); }
+  }
+
+  /* =========================================================
+   * クリップボード
+   * =======================================================*/
+  function copyText(text) {
+    return new Promise(function (resolve) {
+      var done = false;
+      function fallback() {
+        if (done) return;
+        try {
+          var ta = document.createElement('textarea');
+          ta.value = text;
+          ta.setAttribute('readonly', '');
+          ta.style.position = 'fixed';
+          ta.style.top = '0';
+          ta.style.left = '0';
+          ta.style.opacity = '0';
+          document.body.appendChild(ta);
+          ta.select();
+          ta.setSelectionRange(0, ta.value.length);
+          var ok = document.execCommand('copy');
+          document.body.removeChild(ta);
+          done = true;
+          resolve(!!ok);
+        } catch (e) {
+          done = true;
+          resolve(false);
+        }
+      }
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText && window.isSecureContext) {
+          navigator.clipboard.writeText(text).then(function () {
+            done = true; resolve(true);
+          })['catch'](fallback);
+          return;
+        }
+      } catch (e) { /* 続けてフォールバック */ }
+      fallback();
+    });
+  }
+
+  /* =========================================================
+   * 指示書テキストの組み立て
+   * =======================================================*/
+  function buildInstruction(app, type, priority, body) {
+    app = app || {};
+    var lines = [];
+    lines.push('@App Studio');
+    lines.push('# 改修指示書：' + (app.name || '(アプリ名未設定)'));
+    lines.push('* 対象リポジトリ: ' + (app.repo || '(未設定)'));
+    lines.push('* 公開URL: ' + (app.url || '(未設定)'));
+    lines.push('* 改修の種類: ' + type + ' / 優先度: ' + priority);
+    lines.push('');
+    lines.push('## 改修要望');
+    lines.push(String(body == null ? '' : body).trim());
+    lines.push('');
+    lines.push('## 制約');
+    lines.push('* 既存の機能を壊さないこと。');
+    lines.push('* index.html 単一ファイル構成を維持すること。');
+    lines.push('* 変更点を箇条書きで報告すること。');
+    return lines.join('\n');
+  }
+
+  /* =========================================================
+   * タブ切り替え
+   * =======================================================*/
+  var TABS = ['tab-apps', 'tab-compose', 'tab-history'];
+  var activeTab = 'tab-apps';
+  function setTab(id) {
+    if (TABS.indexOf(id) < 0) return;
+    activeTab = id;
+    TABS.forEach(function (t) {
+      var sec = document.getElementById(t);
+      if (sec) sec.hidden = (t !== id);
+    });
+    $$('.nav-btn').forEach(function (btn) {
+      var on = btn.getAttribute('data-tab') === id;
+      btn.classList.toggle('text-indigo-400', on);
+      btn.classList.toggle('text-slate-500', !on);
+      btn.setAttribute('aria-current', on ? 'page' : 'false');
+    });
+    try { window.scrollTo({ top: 0, behavior: 'smooth' }); } catch (e) { window.scrollTo(0, 0); }
+  }
+
+  /* =========================================================
+   * ステップ1：アプリ一覧の描画
+   * =======================================================*/
+  function getSelectedApp() {
+    for (var i = 0; i < state.apps.length; i++) {
+      if (state.apps[i].id === state.selectedId) return state.apps[i];
+    }
+    return null;
+  }
+
+  function renderApps() {
+    var list = $('#appList');
+    if (!list) return;
+    if (previewObserver) { try { previewObserver.disconnect(); } catch (e) {} previewObserver = null; }
+
+    if (!state.apps.length) {
+      list.innerHTML =
+        '<div class="bg-slate-900/80 border border-dashed border-slate-700 rounded-2xl p-6 text-center space-y-2">' +
+        '<i class="fa-regular fa-folder-open text-2xl text-slate-600"></i>' +
+        '<p class="text-[11px] text-slate-400">登録されているアプリがありません。</p>' +
+        '<button type="button" data-act="add" class="text-[11px] font-bold bg-indigo-600 active:bg-indigo-500 px-3 py-2 rounded-lg">' +
+        '<i class="fa-solid fa-plus mr-1"></i>アプリを追加</button></div>';
+      return;
+    }
+
+    list.innerHTML = state.apps.map(function (app) {
+      var selected = app.id === state.selectedId;
+      var openBtn = isHttpUrl(app.url)
+        ? '<a href="' + esc(app.url) + '" target="_blank" rel="noopener noreferrer" ' +
+          'class="py-2.5 bg-slate-800 active:bg-slate-700 border border-slate-700 rounded-xl font-bold text-[11px] text-center">' +
+          '<i class="fa-solid fa-arrow-up-right-from-square mr-1"></i>開く</a>'
+        : '<button type="button" disabled class="py-2.5 bg-slate-800/50 border border-slate-800 rounded-xl font-bold text-[11px] text-slate-600">' +
+          '<i class="fa-solid fa-link-slash mr-1"></i>開く</button>';
+      return '' +
+        '<article data-app-card="' + esc(app.id) + '" class="bg-slate-900/80 border ' +
+          (selected ? 'border-indigo-500 ring-2 ring-indigo-500/40' : 'border-slate-800') +
+          ' rounded-2xl overflow-hidden shadow">' +
+          '<div class="preview-box h-28" data-preview data-url="' + esc(app.url) + '"></div>' +
+          '<div class="p-3.5 space-y-2">' +
+            '<div class="flex items-start justify-between gap-2">' +
+              '<div class="min-w-0">' +
+                '<h3 class="font-bold text-sm truncate">' + esc(app.name) + '</h3>' +
+                '<p class="text-[10px] text-slate-400 font-mono truncate">' +
+                  '<i class="fa-brands fa-github mr-1"></i>' + esc(app.repo || '(リポジトリ未設定)') + '</p>' +
+              '</div>' +
+              '<span data-selected-mark class="shrink-0 text-[9px] font-bold bg-indigo-500/20 text-indigo-300 ' +
+                'border border-indigo-500/40 px-2 py-0.5 rounded-full"' + (selected ? '' : ' hidden') + '>選択中</span>' +
+            '</div>' +
+            (app.url
+              ? '<p class="text-[10px] text-indigo-300/90 font-mono truncate">' + esc(app.url) + '</p>'
+              : '<p class="text-[10px] text-slate-600 font-mono">公開URL未設定</p>') +
+            (app.memo
+              ? '<p class="text-[11px] text-slate-400 line-clamp-2 whitespace-pre-wrap">' + esc(app.memo) + '</p>'
+              : '') +
+            '<button type="button" data-act="select" class="w-full py-2.5 ' +
+              (selected ? 'bg-indigo-500/20 border border-indigo-500/50 text-indigo-200' : 'bg-indigo-600 active:bg-indigo-500') +
+              ' rounded-xl font-bold text-[11px] mt-1">' +
+              '<i class="fa-solid fa-screwdriver-wrench mr-1"></i>' +
+              (selected ? 'このアプリの改修要望を書く' : 'このアプリを改修する') + '</button>' +
+            '<div class="grid grid-cols-3 gap-1.5">' +
+              openBtn +
+              '<button type="button" data-act="edit" class="py-2.5 bg-slate-800 active:bg-slate-700 border border-slate-700 rounded-xl font-bold text-[11px]">' +
+                '<i class="fa-solid fa-pen mr-1"></i>編集</button>' +
+              '<button type="button" data-act="delete" class="py-2.5 bg-slate-800 active:bg-rose-600/40 border border-slate-700 rounded-xl font-bold text-[11px] text-rose-300">' +
+                '<i class="fa-regular fa-trash-can mr-1"></i>削除</button>' +
+            '</div>' +
+          '</div>' +
+        '</article>';
+    }).join('');
+
+    mountAllPreviews();
+  }
+
+  /* ---- iframe プレビュー ---- */
+  function mountAllPreviews() {
+    var boxes = $$('#appList .preview-box');
+    if (!boxes.length) return;
+    if (typeof window.IntersectionObserver === 'function') {
+      previewObserver = new window.IntersectionObserver(function (entries, obs) {
+        entries.forEach(function (en) {
+          if (en.isIntersecting) {
+            obs.unobserve(en.target);
+            mountPreview(en.target);
+          }
+        });
+      }, { rootMargin: '240px 0px' });
+      boxes.forEach(function (b) { previewObserver.observe(b); });
+    } else {
+      boxes.forEach(mountPreview);
+    }
+  }
+
+  function mountPreview(box) {
+    var url = box.getAttribute('data-url') || '';
+    box.innerHTML = '';
+    var fb = document.createElement('div');
+    fb.className = 'preview-fallback';
+    box.appendChild(fb);
+
+    function fail(msg) {
+      fb.innerHTML = '<i class="fa-regular fa-eye-slash text-base"></i><span>' + esc(msg) + '</span>';
+      if (!box.contains(fb)) box.appendChild(fb);
+    }
+    if (!isHttpUrl(url)) { fail('プレビュー不可（URL未設定）'); return; }
+    fb.innerHTML = '<i class="fa-solid fa-spinner fa-spin text-base"></i><span>プレビューを読み込み中…</span>';
+
+    var frame;
+    try {
+      frame = document.createElement('iframe');
+      // 同一オリジン権限は渡さない（プレビュー先から本アプリのデータへ触れさせない）
+      frame.setAttribute('sandbox', 'allow-scripts allow-popups allow-forms');
+      frame.setAttribute('referrerpolicy', 'no-referrer');
+      frame.setAttribute('loading', 'lazy');
+      frame.setAttribute('tabindex', '-1');
+      frame.setAttribute('aria-hidden', 'true');
+      frame.setAttribute('title', 'preview');
+      frame.src = url;
+    } catch (e) {
+      fail('プレビュー不可');
+      return;
+    }
+
+    var settled = false;
+    var timer = setTimeout(function () {
+      if (settled) return;
+      settled = true;
+      try { frame.remove(); } catch (e) {}
+      fail('プレビュー不可');
+    }, 9000);
+
+    frame.addEventListener('load', function () {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      frame.classList.add('is-ready');
+      try { fb.remove(); } catch (e) {}
+    });
+    frame.addEventListener('error', function () {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      try { frame.remove(); } catch (e) {}
+      fail('プレビュー不可');
+    });
+
+    box.appendChild(frame);
+    scalePreview(box);
+  }
+
+  function scalePreview(box) {
+    var frame = box.querySelector('iframe');
+    if (!frame) return;
+    var w = box.clientWidth || 320;
+    frame.style.transform = 'scale(' + (w / 390) + ')';
+  }
+
+  function updateAppSelectionUI() {
+    $$('#appList [data-app-card]').forEach(function (card) {
+      var on = card.getAttribute('data-app-card') === state.selectedId;
+      card.classList.toggle('border-indigo-500', on);
+      card.classList.toggle('ring-2', on);
+      card.classList.toggle('ring-indigo-500/40', on);
+      card.classList.toggle('border-slate-800', !on);
+      var mark = card.querySelector('[data-selected-mark]');
+      if (mark) mark.hidden = !on;
+      var btn = card.querySelector('[data-act="select"]');
+      if (btn) {
+        btn.classList.toggle('bg-indigo-600', !on);
+        btn.classList.toggle('active:bg-indigo-500', !on);
+        btn.classList.toggle('bg-indigo-500/20', on);
+        btn.classList.toggle('border', on);
+        btn.classList.toggle('border-indigo-500/50', on);
+        btn.classList.toggle('text-indigo-200', on);
+        btn.innerHTML = '<i class="fa-solid fa-screwdriver-wrench mr-1"></i>' +
+          (on ? 'このアプリの改修要望を書く' : 'このアプリを改修する');
+      }
+    });
+  }
+
+  /* =========================================================
+   * ステップ2：改修要望の入力
+   * =======================================================*/
+  function renderComposeTarget() {
+    var el = $('#composeTarget');
+    if (!el) return;
+    var app = getSelectedApp();
+    if (!app) {
+      el.innerHTML =
+        '<div class="bg-amber-500/10 border border-amber-500/40 rounded-2xl p-3.5 space-y-2">' +
+          '<p class="text-[11px] font-bold text-amber-200"><i class="fa-solid fa-circle-exclamation mr-1"></i>対象アプリが選ばれていません</p>' +
+          '<p class="text-[10px] text-amber-200/80 leading-relaxed">ステップ1でアプリを選ぶと、指示書に対象リポジトリと公開URLが自動で入ります。</p>' +
+          '<button type="button" data-goto="tab-apps" class="w-full py-2.5 bg-amber-500/20 border border-amber-500/50 text-amber-100 rounded-xl font-bold text-[11px]">' +
+            '<i class="fa-solid fa-layer-group mr-1"></i>アプリを選ぶ</button>' +
+        '</div>';
+      return;
+    }
+    el.innerHTML =
+      '<div class="bg-slate-900/80 border border-indigo-500/40 rounded-2xl p-3.5 flex items-start justify-between gap-2">' +
+        '<div class="min-w-0">' +
+          '<p class="text-[9px] font-bold text-indigo-300">改修対象</p>' +
+          '<h3 class="font-bold text-sm truncate">' + esc(app.name) + '</h3>' +
+          '<p class="text-[10px] text-slate-400 font-mono truncate"><i class="fa-brands fa-github mr-1"></i>' +
+            esc(app.repo || '(リポジトリ未設定)') + '</p>' +
+          '<p class="text-[10px] text-slate-500 font-mono truncate">' + esc(app.url || '公開URL未設定') + '</p>' +
+        '</div>' +
+        '<button type="button" data-goto="tab-apps" class="shrink-0 text-[10px] font-bold bg-slate-800 active:bg-slate-700 ' +
+          'border border-slate-700 px-2.5 py-1.5 rounded-lg"><i class="fa-solid fa-right-left mr-1"></i>変更</button>' +
+      '</div>';
+  }
+
+  function renderPresets() {
+    var el = $('#presetList');
+    if (!el) return;
+    el.innerHTML = PRESETS.map(function (p) {
+      return '<button type="button" data-preset="' + esc(p) + '" ' +
+        'class="text-[11px] font-semibold bg-slate-800 active:bg-indigo-600 border border-slate-700 ' +
+        'px-3 py-1.5 rounded-full"><i class="fa-solid fa-plus text-[9px] mr-1"></i>' + esc(p) + '</button>';
+    }).join('');
+  }
+
+  function renderSelectOptions() {
+    var typeSel = $('#reqType');
+    var priSel = $('#reqPriority');
+    if (typeSel && !typeSel.options.length) {
+      typeSel.innerHTML = TYPES.map(function (t) {
+        return '<option value="' + esc(t) + '">' + esc(t) + '</option>';
+      }).join('');
+    }
+    if (priSel && !priSel.options.length) {
+      priSel.innerHTML = PRIORITIES.map(function (p) {
+        return '<option value="' + esc(p) + '">' + esc(p) + '</option>';
+      }).join('');
+    }
+    if (typeSel) typeSel.value = state.draft.type;
+    if (priSel) priSel.value = state.draft.priority;
+  }
+
+  function updateBodyCount() {
+    var ta = $('#reqBody');
+    var counter = $('#reqCount');
+    if (ta && counter) counter.textContent = ta.value.length + ' 文字';
+  }
+
+  function appendPreset(text) {
+    var ta = $('#reqBody');
+    if (!ta) return;
+    var cur = ta.value.replace(/\s+$/, '');
+    ta.value = (cur ? cur + '\n' : '') + '・' + text + 'したい。\n';
+    state.draft.body = ta.value;
+    updateBodyCount();
+    saveState();
+    try {
+      ta.focus();
+      ta.setSelectionRange(ta.value.length, ta.value.length);
+      ta.scrollTop = ta.scrollHeight;
+    } catch (e) {}
+  }
+
+  /* =========================================================
+   * ステップ3：指示書の生成
+   * =======================================================*/
+  function generate() {
+    var app = getSelectedApp();
+    if (!app) {
+      toast('先に対象アプリを選んでください', 'warn');
+      setTab('tab-apps');
+      return;
+    }
+    var body = $('#reqBody').value.trim();
+    if (!body) {
+      toast('改修要望を入力してください', 'warn');
+      try { $('#reqBody').focus(); } catch (e) {}
+      return;
+    }
+    state.draft.type = $('#reqType').value;
+    state.draft.priority = $('#reqPriority').value;
+    state.draft.body = $('#reqBody').value;
+    saveState();
+
+    lastOutput = buildInstruction(app, state.draft.type, state.draft.priority, body);
+    lastSavedHistoryId = '';
+    $('#outputText').textContent = lastOutput;
+    $('#outputWrap').hidden = false;
+    toast('指示書を生成しました');
+    try {
+      $('#outputWrap').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    } catch (e) {}
+  }
+
+  function saveHistoryFromOutput() {
+    if (!lastOutput) return null;
+    if (lastSavedHistoryId) {
+      for (var i = 0; i < state.history.length; i++) {
+        if (state.history[i].id === lastSavedHistoryId) return state.history[i];
+      }
+    }
+    var app = getSelectedApp() || {};
+    var item = normalizeHistory({
+      at: new Date().toISOString(),
+      appId: app.id || '',
+      appName: app.name || '(アプリ名未設定)',
+      repo: app.repo || '',
+      url: app.url || '',
+      type: state.draft.type,
+      priority: state.draft.priority,
+      body: String($('#reqBody').value || '').trim(),
+      text: lastOutput,
+      done: false
+    });
+    state.history.unshift(item);
+    lastSavedHistoryId = item.id;
+    saveState();
+    renderHistory();
+    updateHistoryBadge();
+    return item;
+  }
+
+  /* =========================================================
+   * ステップ4：履歴
+   * =======================================================*/
+  var FILTERS = [
+    { key: 'all', label: 'すべて' },
+    { key: 'open', label: '未対応' },
+    { key: 'done', label: '対応済み' }
+  ];
+
+  function filteredHistory() {
+    return state.history.filter(function (h) {
+      if (state.filter === 'open') return !h.done;
+      if (state.filter === 'done') return !!h.done;
+      return true;
+    });
+  }
+
+  function renderHistoryFilter() {
+    var el = $('#historyFilter');
+    if (!el) return;
+    var counts = {
+      all: state.history.length,
+      open: state.history.filter(function (h) { return !h.done; }).length,
+      done: state.history.filter(function (h) { return !!h.done; }).length
+    };
+    el.innerHTML = FILTERS.map(function (f) {
+      var on = state.filter === f.key;
+      return '<button type="button" data-filter="' + f.key + '" class="shrink-0 text-[11px] font-bold px-3 py-1.5 rounded-full border ' +
+        (on ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-slate-900 border-slate-700 text-slate-400') +
+        '">' + esc(f.label) + ' ' + counts[f.key] + '</button>';
+    }).join('');
+  }
+
+  function priorityBadge(p) {
+    var cls = p === '高' ? 'bg-rose-500/20 text-rose-300 border-rose-500/40'
+      : p === '中' ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+      : 'bg-slate-700/40 text-slate-300 border-slate-600';
+    return '<span class="text-[9px] font-bold border px-2 py-0.5 rounded-full ' + cls + '">優先度 ' + esc(p) + '</span>';
+  }
+
+  function renderHistory() {
+    renderHistoryFilter();
+    var list = $('#historyList');
+    if (!list) return;
+    var items = filteredHistory();
+    if (!items.length) {
+      list.innerHTML =
+        '<div class="bg-slate-900/80 border border-dashed border-slate-700 rounded-2xl p-6 text-center space-y-2">' +
+          '<i class="fa-regular fa-clock text-2xl text-slate-600"></i>' +
+          '<p class="text-[11px] text-slate-400">' +
+            (state.history.length ? 'この条件に一致する履歴はありません。' : '履歴はまだありません。指示書をコピーすると自動で保存されます。') +
+          '</p></div>';
+      return;
+    }
+    list.innerHTML = items.map(function (h) {
+      return '' +
+        '<article data-history="' + esc(h.id) + '" class="bg-slate-900/80 border ' +
+          (h.done ? 'border-emerald-600/40' : 'border-slate-800') + ' rounded-2xl p-3.5 space-y-2 shadow">' +
+          '<div class="flex items-start justify-between gap-2">' +
+            '<div class="min-w-0">' +
+              '<p class="text-[10px] text-slate-500 font-mono">' + esc(fmtDate(h.at)) + '</p>' +
+              '<h3 class="font-bold text-sm truncate' + (h.done ? ' line-through text-slate-400' : '') + '">' + esc(h.appName) + '</h3>' +
+              '<p class="text-[10px] text-slate-400 font-mono truncate">' + esc(h.repo || '(リポジトリ未設定)') + '</p>' +
+            '</div>' +
+            '<label class="shrink-0 flex items-center gap-1.5 text-[10px] font-semibold ' +
+              (h.done ? 'text-emerald-300' : 'text-slate-400') + '">' +
+              '<input type="checkbox" data-act="done" class="w-4 h-4 accent-emerald-500"' + (h.done ? ' checked' : '') + '>' +
+              '<span>対応済み</span></label>' +
+          '</div>' +
+          '<div class="flex flex-wrap gap-1.5">' +
+            '<span class="text-[9px] font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 px-2 py-0.5 rounded-full">' +
+              esc(h.type) + '</span>' +
+            priorityBadge(h.priority) +
+          '</div>' +
+          '<p class="text-[11px] text-slate-300 leading-relaxed line-clamp-3 whitespace-pre-wrap">' + esc(h.body) + '</p>' +
+          '<details class="group">' +
+            '<summary class="text-[10px] text-indigo-300 font-semibold cursor-pointer list-none">' +
+              '<i class="fa-solid fa-chevron-down mr-1 text-[8px]"></i>指示書の全文を表示</summary>' +
+            '<pre class="mt-2 bg-slate-950 border border-slate-800 rounded-xl p-3 text-[10px] leading-relaxed ' +
+              'text-slate-300 max-h-64 overflow-auto" style="white-space:pre-wrap;word-break:break-word;">' +
+              esc(h.text) + '</pre>' +
+          '</details>' +
+          '<div class="grid grid-cols-3 gap-2 pt-0.5">' +
+            '<button type="button" data-act="copy" class="col-span-2 py-2.5 bg-emerald-600/90 active:bg-emerald-500 rounded-xl font-bold text-[11px]">' +
+              '<i class="fa-regular fa-copy mr-1"></i>再コピー</button>' +
+            '<button type="button" data-act="delete" class="py-2.5 bg-slate-800 active:bg-rose-600/40 border border-slate-700 text-rose-300 rounded-xl font-bold text-[11px]">' +
+              '<i class="fa-regular fa-trash-can mr-1"></i>削除</button>' +
+          '</div>' +
+        '</article>';
+    }).join('');
+  }
+
+  function updateHistoryBadge() {
+    var badge = $('#historyBadge');
+    if (!badge) return;
+    var open = state.history.filter(function (h) { return !h.done; }).length;
+    badge.textContent = open > 99 ? '99+' : String(open);
+    badge.hidden = open === 0;
+  }
+
+  function findHistory(id) {
+    for (var i = 0; i < state.history.length; i++) {
+      if (state.history[i].id === id) return state.history[i];
+    }
+    return null;
+  }
+
+  /* =========================================================
+   * アプリ追加・編集モーダル
+   * =======================================================*/
+  function openAppModal(app) {
+    editingAppId = app ? app.id : '';
+    $('#appModalTitle').textContent = app ? 'アプリを編集' : 'アプリを追加';
+    $('#appName').value = app ? app.name : '';
+    $('#appRepo').value = app ? app.repo : '';
+    $('#appUrl').value = app ? app.url : '';
+    $('#appMemo').value = app ? app.memo : '';
+    $('#appModal').hidden = false;
+    try { $('#appName').focus(); } catch (e) {}
+  }
+
+  function saveAppFromModal() {
+    var name = $('#appName').value.trim();
+    var repo = $('#appRepo').value.trim();
+    var url = $('#appUrl').value.trim();
+    var memo = $('#appMemo').value;
+    if (!name) {
+      toast('アプリ名を入力してください', 'warn');
+      try { $('#appName').focus(); } catch (e) {}
+      return;
+    }
+    if (url && !isHttpUrl(url)) {
+      toast('公開URLは http(s):// で始めてください', 'warn');
+      try { $('#appUrl').focus(); } catch (e) {}
+      return;
+    }
+    if (editingAppId) {
+      var target = null;
+      for (var i = 0; i < state.apps.length; i++) {
+        if (state.apps[i].id === editingAppId) { target = state.apps[i]; break; }
+      }
+      if (target) {
+        target.name = name; target.repo = repo; target.url = url; target.memo = memo;
+      }
+      toast('アプリを更新しました');
+    } else {
+      var created = normalizeApp({ name: name, repo: repo, url: url, memo: memo });
+      state.apps.push(created);
+      state.selectedId = created.id;
+      toast('アプリを追加しました');
+    }
+    editingAppId = '';
+    $('#appModal').hidden = true;
+    saveState();
+    renderApps();
+    renderComposeTarget();
+  }
+
+  /* =========================================================
+   * 設定・エクスポート / インポート
+   * =======================================================*/
+  function currentExportJson() {
+    return JSON.stringify({
+      app: 'app-refiner',
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      apps: state.apps,
+      history: state.history
+    }, null, 2);
+  }
+
+  function renderStats() {
+    var open = state.history.filter(function (h) { return !h.done; }).length;
+    $('#statsLine').textContent =
+      '登録アプリ ' + state.apps.length + ' 件 / 履歴 ' + state.history.length + ' 件（未対応 ' + open + ' 件）' +
+      (storageOk ? '' : ' ※保存領域が使えないため一時保持中');
+  }
+
+  function exportToFile() {
+    var json = currentExportJson();
+    $('#exportText').value = json;
+    try {
+      var blob = new Blob([json], { type: 'application/json' });
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement('a');
+      var d = new Date();
+      var p = function (n) { return ('0' + n).slice(-2); };
+      a.href = url;
+      a.download = 'app-refiner-backup-' + d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) + '.json';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(function () { try { URL.revokeObjectURL(url); } catch (e) {} }, 1000);
+      toast('JSONを書き出しました');
+    } catch (e) {
+      toast('保存できませんでした。下の内容をコピーしてください', 'warn');
+    }
+  }
+
+  function parseImport(raw) {
+    var data = JSON.parse(raw);
+    if (!data || typeof data !== 'object') throw new Error('形式が不正です');
+    var apps = Array.isArray(data.apps) ? data.apps.map(normalizeApp) : [];
+    var history = Array.isArray(data.history) ? data.history.map(normalizeHistory) : [];
+    if (!apps.length && !history.length) throw new Error('apps / history が見つかりません');
+    return { apps: apps, history: history };
+  }
+
+  function applyImport(raw, mode) {
+    var parsed;
+    try {
+      parsed = parseImport(raw);
+    } catch (e) {
+      toast('読み込めませんでした（' + (e && e.message ? e.message : 'JSONエラー') + '）', 'err');
+      return;
+    }
+    if (mode === 'replace') {
+      state.apps = parsed.apps;
+      state.history = parsed.history;
+    } else {
+      var appIds = {};
+      var appKeys = {};
+      state.apps.forEach(function (a) {
+        appIds[a.id] = true;
+        appKeys[(a.repo || a.name).toLowerCase()] = true;
+      });
+      parsed.apps.forEach(function (a) {
+        var key = (a.repo || a.name).toLowerCase();
+        if (appIds[a.id] || appKeys[key]) return;
+        appIds[a.id] = true; appKeys[key] = true;
+        state.apps.push(a);
+      });
+      var hisIds = {};
+      state.history.forEach(function (h) { hisIds[h.id] = true; });
+      parsed.history.forEach(function (h) {
+        if (hisIds[h.id]) return;
+        hisIds[h.id] = true;
+        state.history.push(h);
+      });
+      state.history.sort(function (a, b) { return String(b.at).localeCompare(String(a.at)); });
+    }
+    if (!state.apps.some(function (a) { return a.id === state.selectedId; })) {
+      state.selectedId = state.apps.length ? state.apps[0].id : '';
+    }
+    saveState();
+    renderApps();
+    renderComposeTarget();
+    renderHistory();
+    renderStats();
+    updateHistoryBadge();
+    toast(mode === 'replace' ? 'データを置き換えました' : 'データを取り込みました');
+  }
+
+  /* =========================================================
+   * イベント登録
+   * =======================================================*/
+  function bindEvents() {
+    // ボトムナビ
+    $$('.nav-btn').forEach(function (btn) {
+      btn.addEventListener('click', function () { setTab(btn.getAttribute('data-tab')); });
+    });
+    // data-goto（画面内リンク）
+    document.addEventListener('click', function (ev) {
+      var t = ev.target.closest ? ev.target.closest('[data-goto]') : null;
+      if (t) setTab(t.getAttribute('data-goto'));
+    });
+
+    // ステップ1：アプリ一覧
+    $('#btnAddApp').addEventListener('click', function () { openAppModal(null); });
+    $('#appList').addEventListener('click', function (ev) {
+      var addBtn = ev.target.closest('[data-act="add"]');
+      if (addBtn) { openAppModal(null); return; }
+      var card = ev.target.closest('[data-app-card]');
+      if (!card) return;
+      var id = card.getAttribute('data-app-card');
+      var app = null;
+      for (var i = 0; i < state.apps.length; i++) {
+        if (state.apps[i].id === id) { app = state.apps[i]; break; }
+      }
+      if (!app) return;
+      var actEl = ev.target.closest('[data-act]');
+      var act = actEl ? actEl.getAttribute('data-act') : 'select-card';
+
+      if (act === 'edit') {
+        openAppModal(app);
+      } else if (act === 'delete') {
+        askConfirm('アプリを削除', '「' + app.name + '」を一覧から削除します。履歴は残ります。', '削除する')
+          .then(function (ok) {
+            if (!ok) return;
+            state.apps = state.apps.filter(function (a) { return a.id !== id; });
+            if (state.selectedId === id) {
+              state.selectedId = state.apps.length ? state.apps[0].id : '';
+            }
+            saveState();
+            renderApps();
+            renderComposeTarget();
+            renderStats();
+            toast('アプリを削除しました');
+          });
+      } else if (act === 'select') {
+        state.selectedId = id;
+        saveState();
+        updateAppSelectionUI();
+        renderComposeTarget();
+        setTab('tab-compose');
+      } else {
+        state.selectedId = id;
+        saveState();
+        updateAppSelectionUI();
+        renderComposeTarget();
+      }
+    });
+
+    // ステップ2：入力
+    $('#presetList').addEventListener('click', function (ev) {
+      var btn = ev.target.closest('[data-preset]');
+      if (btn) appendPreset(btn.getAttribute('data-preset'));
+    });
+    var bodyTimer = null;
+    $('#reqBody').addEventListener('input', function () {
+      updateBodyCount();
+      if (bodyTimer) clearTimeout(bodyTimer);
+      bodyTimer = setTimeout(function () {
+        state.draft.body = $('#reqBody').value;
+        saveState();
+      }, 400);
+    });
+    $('#btnClearBody').addEventListener('click', function () {
+      if (!$('#reqBody').value) return;
+      askConfirm('入力をクリア', '入力中の改修要望を消去します。', 'クリアする').then(function (ok) {
+        if (!ok) return;
+        $('#reqBody').value = '';
+        state.draft.body = '';
+        updateBodyCount();
+        saveState();
+        toast('入力をクリアしました');
+      });
+    });
+    $('#reqType').addEventListener('change', function () {
+      state.draft.type = $('#reqType').value;
+      saveState();
+    });
+    $('#reqPriority').addEventListener('change', function () {
+      state.draft.priority = $('#reqPriority').value;
+      saveState();
+    });
+
+    // ステップ3：生成・コピー
+    $('#btnGenerate').addEventListener('click', generate);
+    $('#btnCopy').addEventListener('click', function () {
+      if (!lastOutput) return;
+      copyText(lastOutput).then(function (ok) {
+        saveHistoryFromOutput();
+        if (ok) {
+          toast('コピーしました。履歴にも保存しました');
+        } else {
+          toast('コピーできませんでした。長押しで選択してください', 'warn');
+        }
+      });
+    });
+    $('#btnSaveOnly').addEventListener('click', function () {
+      if (!lastOutput) return;
+      var item = saveHistoryFromOutput();
+      toast(item ? '履歴に保存しました' : '保存できませんでした', item ? 'ok' : 'err');
+    });
+
+    // ステップ4：履歴
+    $('#historyFilter').addEventListener('click', function (ev) {
+      var btn = ev.target.closest('[data-filter]');
+      if (!btn) return;
+      state.filter = btn.getAttribute('data-filter');
+      saveState();
+      renderHistory();
+    });
+    $('#historyList').addEventListener('click', function (ev) {
+      var card = ev.target.closest('[data-history]');
+      if (!card) return;
+      var id = card.getAttribute('data-history');
+      var item = findHistory(id);
+      if (!item) return;
+      var actEl = ev.target.closest('[data-act]');
+      if (!actEl) return;
+      var act = actEl.getAttribute('data-act');
+      if (act === 'copy') {
+        copyText(item.text).then(function (ok) {
+          toast(ok ? 'コピーしました' : 'コピーできませんでした。全文を長押しで選択してください', ok ? 'ok' : 'warn');
+        });
+      } else if (act === 'delete') {
+        askConfirm('履歴を削除', fmtDate(item.at) + ' の「' + item.appName + '」への依頼を削除します。', '削除する')
+          .then(function (ok) {
+            if (!ok) return;
+            state.history = state.history.filter(function (h) { return h.id !== id; });
+            if (lastSavedHistoryId === id) lastSavedHistoryId = '';
+            saveState();
+            renderHistory();
+            renderStats();
+            updateHistoryBadge();
+            toast('履歴を削除しました');
+          });
+      }
+    });
+    $('#historyList').addEventListener('change', function (ev) {
+      var chk = ev.target.closest('[data-act="done"]');
+      if (!chk) return;
+      var card = ev.target.closest('[data-history]');
+      if (!card) return;
+      var item = findHistory(card.getAttribute('data-history'));
+      if (!item) return;
+      item.done = !!chk.checked;
+      saveState();
+      renderHistory();
+      renderStats();
+      updateHistoryBadge();
+      toast(item.done ? '対応済みにしました' : '未対応に戻しました');
+    });
+    $('#btnClearHistory').addEventListener('click', function () {
+      if (!state.history.length) { toast('履歴はありません', 'warn'); return; }
+      askConfirm('履歴を全削除', '保存されている ' + state.history.length + ' 件の履歴をすべて削除します。この操作は取り消せません。', 'すべて削除')
+        .then(function (ok) {
+          if (!ok) return;
+          state.history = [];
+          lastSavedHistoryId = '';
+          saveState();
+          renderHistory();
+          renderStats();
+          updateHistoryBadge();
+          toast('履歴をすべて削除しました');
+        });
+    });
+
+    // モーダル共通
+    $$('[data-close]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var m = document.getElementById(btn.getAttribute('data-close'));
+        if (m) m.hidden = true;
+      });
+    });
+    $('#btnSaveApp').addEventListener('click', saveAppFromModal);
+    $('#appRepo').addEventListener('blur', function () {
+      var repo = $('#appRepo').value.trim();
+      if (repo && !$('#appUrl').value.trim()) {
+        $('#appUrl').value = 'https://' + GH_USER + '.github.io/' + repo + '/';
+      }
+    });
+
+    // 設定
+    $('#btnSettings').addEventListener('click', function () {
+      renderStats();
+      $('#settingsModal').hidden = false;
+    });
+    $('#btnExportFile').addEventListener('click', exportToFile);
+    $('#btnExportCopy').addEventListener('click', function () {
+      var json = currentExportJson();
+      $('#exportText').value = json;
+      copyText(json).then(function (ok) {
+        toast(ok ? 'JSONをコピーしました' : 'コピーできませんでした。テキストを長押しで選択してください', ok ? 'ok' : 'warn');
+      });
+    });
+    $('#importFile').addEventListener('change', function (ev) {
+      var file = ev.target.files && ev.target.files[0];
+      if (!file) return;
+      var reader = new FileReader();
+      reader.onload = function () {
+        $('#importText').value = String(reader.result || '');
+        toast('ファイルを読み込みました。取込方法を選んでください');
+      };
+      reader.onerror = function () { toast('ファイルを読み込めませんでした', 'err'); };
+      try { reader.readAsText(file); } catch (e) { toast('ファイルを読み込めませんでした', 'err'); }
+    });
+    $('#btnImportMerge').addEventListener('click', function () {
+      var raw = $('#importText').value.trim();
+      if (!raw) { toast('JSONを貼り付けるかファイルを選んでください', 'warn'); return; }
+      applyImport(raw, 'merge');
+    });
+    $('#btnImportReplace').addEventListener('click', function () {
+      var raw = $('#importText').value.trim();
+      if (!raw) { toast('JSONを貼り付けるかファイルを選んでください', 'warn'); return; }
+      askConfirm('データを置き換え', '現在のアプリと履歴をすべて破棄し、読み込んだ内容で置き換えます。', '置き換える')
+        .then(function (ok) { if (ok) applyImport(raw, 'replace'); });
+    });
+    $('#btnResetAll').addEventListener('click', function () {
+      askConfirm('初期状態に戻す', '登録アプリと履歴をすべて削除し、初期設定に戻します。この操作は取り消せません。', '初期化する')
+        .then(function (ok) {
+          if (!ok) return;
+          var fresh = seed();
+          state.apps = fresh.apps;
+          state.history = fresh.history;
+          state.selectedId = fresh.selectedId;
+          state.draft = fresh.draft;
+          state.filter = 'all';
+          lastOutput = '';
+          lastSavedHistoryId = '';
+          $('#reqBody').value = '';
+          $('#outputWrap').hidden = true;
+          updateBodyCount();
+          renderSelectOptions();
+          saveState();
+          renderApps();
+          renderComposeTarget();
+          renderHistory();
+          renderStats();
+          updateHistoryBadge();
+          $('#settingsModal').hidden = true;
+          toast('初期状態に戻しました');
+        });
+    });
+
+    // 確認ダイアログ
+    $('#confirmOk').addEventListener('click', function () { closeConfirm(true); });
+    $('#confirmCancel').addEventListener('click', function () { closeConfirm(false); });
+    $('#confirmModal').addEventListener('click', function (ev) {
+      if (ev.target === $('#confirmModal')) closeConfirm(false);
+    });
+
+    // Esc でモーダルを閉じる
+    document.addEventListener('keydown', function (ev) {
+      if (ev.key !== 'Escape') return;
+      if (!$('#confirmModal').hidden) { closeConfirm(false); return; }
+      if (!$('#appModal').hidden) { $('#appModal').hidden = true; return; }
+      if (!$('#settingsModal').hidden) { $('#settingsModal').hidden = true; }
+    });
+
+    // 画面幅変化に合わせてプレビューを再スケール
+    var resizeTimer = null;
+    window.addEventListener('resize', function () {
+      if (resizeTimer) clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(function () {
+        $$('#appList .preview-box').forEach(scalePreview);
+      }, 150);
+    });
+  }
+
+  /* =========================================================
+   * 初期化
+   * =======================================================*/
+  function init() {
+    state = loadState();
+    if (!storageOk) {
+      var warn = $('#storageWarn');
+      if (warn) warn.hidden = false;
+    } else {
+      saveState();
+    }
+    renderSelectOptions();
+    $('#reqBody').value = state.draft.body || '';
+    updateBodyCount();
+    renderPresets();
+    renderApps();
+    renderComposeTarget();
+    renderHistory();
+    renderStats();
+    updateHistoryBadge();
+    bindEvents();
+    setTab('tab-apps');
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
+})();
+</script>
+</body>
+</html>
