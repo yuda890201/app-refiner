@@ -2,8 +2,10 @@
  * App Refiner スモークテスト（Playwright）
  *
  * 使い方:
- *   npx http-server -p 8899 -s .     # リポジトリ直下で静的配信
+ *   npx http-server . -p 8899 --silent   # リポジトリ直下で静的配信
  *   node tests/smoke.mjs             # 別ターミナルで実行
+ *
+ * ポートは環境変数 PORT で変更できます（既定 8899）。
  *
  * 注意: CDN（cdn.tailwindcss.com / cdnjs）に到達できない環境では見た目が崩れますが、
  * ここで検証しているのは機能なのでテスト結果には影響しません。
@@ -22,7 +24,9 @@ const page = await ctx.newPage();
 page.on('pageerror', e => errors.push('pageerror: ' + e.message));
 page.on('console', m => { if (m.type() === 'error') errors.push('console: ' + m.text()); });
 
-await page.goto('http://127.0.0.1:8899/index.html', { waitUntil: 'domcontentloaded' });
+const PORT = process.env.PORT || '8899';
+const BASE = 'http://127.0.0.1:' + PORT;
+await page.goto(BASE + '/index.html', { waitUntil: 'domcontentloaded' });
 await page.waitForTimeout(1200);
 
 const log = [];
@@ -131,6 +135,7 @@ ok('AR-5 未ヒット時の案内', (await page.locator('#historyList').innerTex
 await page.fill('#historySearch', '');
 await page.waitForTimeout(400);
 ok('AR-5 検索クリアで戻る', await page.locator('[data-history]').count() === 1);
+ok('AR-5 履歴が1アプリのみならアプリ選択は隠れる', await page.locator('#historyApp').isHidden());
 
 // 二重コピーで重複しない
 await page.locator('.nav-btn[data-tab="tab-compose"]').click();
@@ -209,6 +214,60 @@ await page.waitForTimeout(400);
 const exported = await page.inputValue('#exportText');
 let parsed = null; try { parsed = JSON.parse(exported); } catch {}
 ok('エクスポートJSONが妥当', !!parsed && parsed.apps.length === 5 && parsed.history.length >= 1);
+
+// AR-6: 指示書テンプレート（制約）の編集
+await page.fill('#tplBase', '* 既存の機能を壊さないこと。\n* 追加した独自ルール。');
+await page.waitForTimeout(500);
+await page.locator('[data-close="settingsModal"]').first().click();
+await page.locator('.nav-btn[data-tab="tab-compose"]').click();
+await page.waitForTimeout(300);
+await page.click('#btnGenerate');
+await page.waitForTimeout(400);
+const outT = await page.locator('#outputText').innerText();
+ok('AR-6 編集した制約が反映される', outT.includes('* 追加した独自ルール。'));
+ok('AR-6 消した既定行は出ない', !outT.includes('* 変更点を箇条書きで報告すること。'));
+
+// AR-7: 種類ごとの追加制約
+await page.click('#btnSettings');
+await page.waitForTimeout(300);
+await page.click('#btnTplRecommend');
+await page.waitForTimeout(400);
+await page.selectOption('#tplType', 'リファクタ');
+await page.waitForTimeout(200);
+ok('AR-7 おすすめが種類別に入る',
+  (await page.inputValue('#tplByType')).includes('外から見た挙動を変えないこと'));
+await page.locator('[data-close="settingsModal"]').first().click();
+await page.locator('.nav-btn[data-tab="tab-compose"]').click();
+await page.waitForTimeout(300);
+await page.selectOption('#reqType', 'リファクタ');
+await page.click('#btnGenerate');
+await page.waitForTimeout(400);
+const outR = await page.locator('#outputText').innerText();
+ok('AR-7 リファクタ時だけの制約が付く', outR.includes('* 外から見た挙動を変えないこと。'));
+await page.selectOption('#reqType', 'UI改善');
+await page.click('#btnGenerate');
+await page.waitForTimeout(400);
+ok('AR-7 別の種類では付かない',
+  !(await page.locator('#outputText').innerText()).includes('* 外から見た挙動を変えないこと。'));
+
+// テンプレートを既定に戻す
+await page.click('#btnSettings');
+await page.waitForTimeout(300);
+await page.click('#btnTplReset');
+await page.waitForTimeout(300);
+await page.click('#confirmOk');
+await page.waitForTimeout(400);
+ok('AR-6 既定に戻せる',
+  (await page.inputValue('#tplBase')).includes('* 変更点を箇条書きで報告すること。'));
+await page.locator('[data-close="settingsModal"]').first().click();
+await page.locator('.nav-btn[data-tab="tab-compose"]').click();
+await page.waitForTimeout(300);
+await page.click('#btnGenerate');
+await page.waitForTimeout(400);
+ok('AR-6 既定に戻すと従来の出力',
+  (await page.locator('#outputText').innerText()).includes('* 変更点を箇条書きで報告すること。'));
+await page.click('#btnSettings');
+await page.waitForTimeout(300);
 
 // AR-2: プレビュー表示トグル
 await page.uncheck('#optPreview');

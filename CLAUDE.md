@@ -17,9 +17,11 @@ App Refiner（ブラッシュアップ司令塔）のリポジトリです。作
 ## 変更したら
 
 ```bash
-npx http-server -p 8899 -s .
-node tests/smoke.mjs      # 34項目のスモークテスト。機能を追加したらここにも追記する
+npx http-server . -p 8899 --silent
+node tests/smoke.mjs      # 66項目のスモークテスト。機能を追加したらここにも追記する
 ```
+
+ポートは環境変数 `PORT` で変えられる（`scripts/Invoke-AppRefinerCheck.ps1 -RunTests` が利用）。
 
 ## データ構造
 
@@ -36,7 +38,8 @@ node tests/smoke.mjs      # 34項目のスモークテスト。機能を追加�
   "selectedId": "",
   "draft": { "type": "", "priority": "", "body": "", "includeHistory": false },
   "filter": "all|open|done",
-  "settings": { "preview": true }
+  "settings": { "preview": true },
+  "template": { "constraints": "1行1項目のテキスト", "byType": { "UI改善": "追加する行", "...": "" } }
 }
 ```
 
@@ -44,6 +47,9 @@ node tests/smoke.mjs      # 34項目のスモークテスト。機能を追加�
 変更するときは README とこのファイルも合わせて更新すること。
 「## これまでの改修依頼」節は `draft.includeHistory` が true のときだけ付き、
 「## 改修要望」と「## 制約」の間に入る（既定はオフ＝従来どおりの出力）。
+「## 制約」の中身は `state.template` から組み立てる。既定値は `DEFAULT_CONSTRAINTS`
+（従来の3行）で、種類ごとの追加 `byType` の既定は空。したがって設定を触らなければ出力は変わらない。
+`RECOMMENDED_BY_TYPE` は「おすすめを入れる」を押したときだけ使われる候補文で、既定値ではない。
 
 ## AR-10 のフォールバックCSSについて
 

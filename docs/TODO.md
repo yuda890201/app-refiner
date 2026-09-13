@@ -26,16 +26,15 @@ App Refiner の改修は Claude Code からこのリポジトリへ直接コミ�
 
 ## ⬜ App Refiner 本体 — 詳細は [tasks/app-refiner.md](tasks/app-refiner.md)
 
-✅ AR-9 / AR-2 / AR-10 / AR-11 / AR-4 / AR-12 / AR-5 は実装済み（スモークテスト58項目・全PASS）。
+✅ AR-2 / AR-4 / AR-5 / AR-6 / AR-7 / AR-9 / AR-10 / AR-11 / AR-12 は実装済み
+（スモークテスト66項目・全PASS）。AR-1 の実機確認も完了。
+
+残っているのは次の2件だけです。
 
 | ID | 優先度 | 内容 | 状態 |
 | --- | --- | --- | --- |
-| AR-1 | 高 | 実機確認（iPhone / Android）※コード変更なし | ⬜ 実機が必要 |
-| AR-3 | 中 | 初期登録アプリの見直し | 🔶 app-refiner を追加済み。残りは要判断 |
-| AR-5 | 低 | 履歴のアプリ別絞り込み（キーワード検索は完了） | ⬜ |
-| AR-6 | 低 | 指示書テンプレート（制約節）の編集機能 | ⬜ フォーマット契約の変更を伴う |
-| AR-7 | 低 | 改修の種類ごとに制約文を出し分け | ⬜ 同上 |
-| AR-8 | 🔶 | PWA 化（単一ファイル原則と衝突するため要判断） | ⬜ |
+| AR-3 | 中 | 初期登録アプリの見直し | 🔶 app-refiner を追加済み。実際に運用しているアプリ一覧をもらえれば反映できます |
+| AR-8 | 🔶 | PWA 化 | ⬜ 単一ファイル原則と衝突するため、原則を緩めるかの判断が必要 |
 
 ## ⬜ App Studio 側 — 詳細は [tasks/app-studio.md](tasks/app-studio.md)
 
@@ -53,7 +52,10 @@ App Refiner の改修は Claude Code からこのリポジトリへ直接コミ�
 
 ## ⬜ 確認待ち
 
-- 本番URL <https://yuda890201.github.io/app-refiner/> が新しい `index.html` を配信しているか
-  （PR #1 マージ済み。反映まで数分かかる場合あり）
-- GitHub Pages のビルド元ブランチ（`main` / `gh-pages`）とビルド方式
-- 承認チケット `apr_n-iVjhnEliE` の最終ステータス（デプロイ自体は成功済みのため実害なし）
+Windows では `scripts\Invoke-AppRefinerCheck.ps1` を実行すると、以下をまとめて確認できます。
+
+- 本番URL <https://yuda890201.github.io/app-refiner/> が最新の `index.html` を配信しているか
+- GitHub Pages のビルド元ブランチとビルド方式（`gh` が必要）
+- スモークテストが通るか（`-RunTests`）
+
+そのほか、承認チケット `apr_n-iVjhnEliE` の最終ステータス（デプロイ自体は成功済みのため実害なし）。

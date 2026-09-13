@@ -207,6 +207,8 @@
         class="w-full bg-slate-900 border border-slate-800 focus:border-indigo-500 outline-none rounded-xl py-2.5 pl-9 pr-3 text-slate-100">
       <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 text-xs"></i>
     </div>
+    <select id="historyApp"
+      class="w-full bg-slate-900 border border-slate-800 focus:border-indigo-500 outline-none rounded-xl p-2.5 text-slate-100"></select>
     <div id="historyFilter" class="flex gap-2 overflow-x-auto scroll-x pb-1"></div>
     <div id="historyList" class="space-y-3"></div>
   </section>
@@ -299,6 +301,30 @@
       </div>
 
       <div class="space-y-2 border-t border-slate-800 pt-3">
+        <p class="text-[11px] font-semibold text-slate-300"><i class="fa-solid fa-file-pen mr-1"></i>指示書テンプレート</p>
+        <p class="text-[10px] text-slate-500 leading-relaxed">
+          指示書の「## 制約」に入る文章です。1行が1項目になります。空にするとその節は出力されません。
+        </p>
+        <label for="tplBase" class="block text-[10px] font-semibold text-slate-400">共通の制約（すべての種類に付きます）</label>
+        <textarea id="tplBase" rows="4"
+          class="w-full bg-slate-950 border border-slate-700 focus:border-indigo-500 outline-none rounded-xl p-2.5 text-slate-100 text-[11px] resize-y"></textarea>
+
+        <label for="tplType" class="block text-[10px] font-semibold text-slate-400 pt-1">改修の種類ごとに追加する制約</label>
+        <select id="tplType" class="w-full bg-slate-950 border border-slate-700 focus:border-indigo-500 outline-none rounded-xl p-2.5 text-slate-100"></select>
+        <textarea id="tplByType" rows="3" placeholder="空欄なら何も追加されません（既定）"
+          class="w-full bg-slate-950 border border-slate-700 focus:border-indigo-500 outline-none rounded-xl p-2.5 text-slate-100 text-[11px] resize-y"></textarea>
+
+        <div class="grid grid-cols-2 gap-2">
+          <button id="btnTplRecommend" type="button" class="py-2.5 bg-slate-800 active:bg-slate-700 border border-slate-700 rounded-xl font-bold text-[11px]">
+            <i class="fa-solid fa-lightbulb mr-1"></i>おすすめを入れる
+          </button>
+          <button id="btnTplReset" type="button" class="py-2.5 bg-slate-800 active:bg-slate-700 border border-slate-700 rounded-xl font-bold text-[11px]">
+            <i class="fa-solid fa-rotate-left mr-1"></i>既定に戻す
+          </button>
+        </div>
+      </div>
+
+      <div class="space-y-2 border-t border-slate-800 pt-3">
         <p class="text-[11px] font-semibold text-slate-300"><i class="fa-solid fa-display mr-1"></i>表示</p>
         <label class="flex items-start gap-2.5">
           <input id="optPreview" type="checkbox" class="w-4 h-4 mt-0.5 accent-indigo-500 shrink-0">
@@ -364,6 +390,27 @@
   var GH_USER = 'yuda890201';
   var TYPES = ['機能追加', '不具合修正', 'UI改善', 'リファクタ'];
   var PRIORITIES = ['高', '中', '低'];
+  /* AR-6: 指示書の「## 制約」の既定値。ここを変えると生成物の契約が変わるので README も更新すること */
+  var DEFAULT_CONSTRAINTS = [
+    '* 既存の機能を壊さないこと。',
+    '* index.html 単一ファイル構成を維持すること。',
+    '* 変更点を箇条書きで報告すること。'
+  ].join('\n');
+
+  /* AR-7: 種類ごとの追加制約。既定は空（＝従来と同じ出力）で、設定から入れられる */
+  var RECOMMENDED_BY_TYPE = {
+    '機能追加': '* 既存の画面やデータ構造との整合性を保つこと。',
+    '不具合修正': '* 再現手順と、修正後に直ったことの確認方法を示すこと。',
+    'UI改善': '* 文字サイズとタップ領域は、スマートフォンで片手操作できる大きさを保つこと。',
+    'リファクタ': '* 外から見た挙動を変えないこと。'
+  };
+
+  function emptyByType() {
+    var o = {};
+    TYPES.forEach(function (t) { o[t] = ''; });
+    return o;
+  }
+
   var PRESETS = [
     'UI/UXを改善', 'スマホ最適化', '音声読み上げを追加', '入力履歴を保存',
     'バグ修正', '文言をわかりやすく', '表示速度を改善'
@@ -436,9 +483,11 @@
     selectedId: '',
     draft: { type: 'UI改善', priority: '中', body: '', includeHistory: false },
     filter: 'all',
-    settings: { preview: true }
+    settings: { preview: true },
+    template: { constraints: DEFAULT_CONSTRAINTS, byType: {} }
   };
-  var searchQuery = ''; // 検索語は保存しない（開くたびにリセット）
+  var searchQuery = '';   // 検索語は保存しない（開くたびにリセット）
+  var historyAppId = 'all'; // AR-5: 履歴のアプリ別絞り込みも保存しない
   var lastOutput = '';
   var lastSavedHistoryId = '';
   var editingAppId = '';
@@ -488,7 +537,23 @@
       selectedId: DEFAULT_APPS[0].id,
       draft: { type: 'UI改善', priority: '中', body: '', includeHistory: false },
       filter: 'all',
-      settings: { preview: true }
+      settings: { preview: true },
+      template: { constraints: DEFAULT_CONSTRAINTS, byType: emptyByType() }
+    };
+  }
+
+  /* AR-6/AR-7: テンプレートの正規化。壊れた値が入っていても既定に戻して動き続ける */
+  function normalizeTemplate(t) {
+    t = (t && typeof t === 'object') ? t : {};
+    var byType = emptyByType();
+    if (t.byType && typeof t.byType === 'object') {
+      TYPES.forEach(function (type) {
+        if (typeof t.byType[type] === 'string') byType[type] = t.byType[type];
+      });
+    }
+    return {
+      constraints: typeof t.constraints === 'string' ? t.constraints : DEFAULT_CONSTRAINTS,
+      byType: byType
     };
   }
 
@@ -522,7 +587,8 @@
         filter: ['all', 'open', 'done'].indexOf(parsed.filter) >= 0 ? parsed.filter : 'all',
         settings: {
           preview: !(parsed.settings && parsed.settings.preview === false)
-        }
+        },
+        template: normalizeTemplate(parsed.template)
       };
     } catch (e) {
       return seed();
@@ -540,7 +606,8 @@
         selectedId: state.selectedId,
         draft: state.draft,
         filter: state.filter,
-        settings: state.settings
+        settings: state.settings,
+        template: state.template
       }));
       return true;
     } catch (e) {
@@ -652,6 +719,19 @@
     return out;
   }
 
+  /* AR-6/AR-7: 共通の制約 + その種類だけの追加制約 */
+  function constraintLines(type) {
+    var out = [];
+    function push(text) {
+      String(text == null ? '' : text).split(/\r?\n/).forEach(function (line) {
+        if (line.trim()) out.push(line.trim());
+      });
+    }
+    push(state.template.constraints);
+    push(state.template.byType[type]);
+    return out;
+  }
+
   function buildInstruction(app, type, priority, body, historyLines) {
     app = app || {};
     var lines = [];
@@ -668,11 +748,12 @@
       lines.push('## これまでの改修依頼');
       lines.push.apply(lines, historyLines);
     }
-    lines.push('');
-    lines.push('## 制約');
-    lines.push('* 既存の機能を壊さないこと。');
-    lines.push('* index.html 単一ファイル構成を維持すること。');
-    lines.push('* 変更点を箇条書きで報告すること。');
+    var constraints = constraintLines(type);
+    if (constraints.length) {
+      lines.push('');
+      lines.push('## 制約');
+      lines.push.apply(lines, constraints);
+    }
     return lines.join('\n');
   }
 
@@ -1072,27 +1153,52 @@
     { key: 'done', label: '対応済み' }
   ];
 
-  function filteredHistory() {
+  function matchesQuery(h) {
     var q = searchQuery.trim().toLowerCase();
+    if (historyAppId !== 'all' && (h.appId || ('name:' + h.appName)) !== historyAppId) return false;
+    if (!q) return true;
+    return (h.appName + ' ' + h.repo + ' ' + h.body + ' ' + h.type + ' ' + h.priority)
+      .toLowerCase().indexOf(q) >= 0;
+  }
+
+  function filteredHistory() {
     return state.history.filter(function (h) {
       if (state.filter === 'open' && h.done) return false;
       if (state.filter === 'done' && !h.done) return false;
-      if (!q) return true;
-      return (h.appName + ' ' + h.repo + ' ' + h.body + ' ' + h.type + ' ' + h.priority)
-        .toLowerCase().indexOf(q) >= 0;
+      return matchesQuery(h);
     });
+  }
+
+  /* AR-5: 履歴に登場するアプリだけを選択肢に出す */
+  function renderHistoryAppFilter() {
+    var el = $('#historyApp');
+    if (!el) return;
+    var seen = {};
+    var opts = [];
+    state.history.forEach(function (h) {
+      var key = h.appId || ('name:' + h.appName);
+      if (seen[key]) return;
+      seen[key] = true;
+      opts.push({ id: key, name: h.appName });
+    });
+    if (historyAppId !== 'all' && !opts.some(function (o) { return o.id === historyAppId; })) {
+      historyAppId = 'all';
+    }
+    el.innerHTML = '<option value="all">すべてのアプリ（' + state.history.length + '件）</option>' +
+      opts.map(function (o) {
+        var n = state.history.filter(function (h) {
+          return (h.appId || ('name:' + h.appName)) === o.id;
+        }).length;
+        return '<option value="' + esc(o.id) + '">' + esc(o.name) + '（' + n + '件）</option>';
+      }).join('');
+    el.value = historyAppId;
+    el.hidden = opts.length < 2;
   }
 
   function renderHistoryFilter() {
     var el = $('#historyFilter');
     if (!el) return;
-    var q = searchQuery.trim().toLowerCase();
-    var scoped = q
-      ? state.history.filter(function (h) {
-          return (h.appName + ' ' + h.repo + ' ' + h.body + ' ' + h.type + ' ' + h.priority)
-            .toLowerCase().indexOf(q) >= 0;
-        })
-      : state.history;
+    var scoped = state.history.filter(matchesQuery);
     var counts = {
       all: scoped.length,
       open: scoped.filter(function (h) { return !h.done; }).length,
@@ -1114,6 +1220,7 @@
   }
 
   function renderHistory() {
+    renderHistoryAppFilter();
     renderHistoryFilter();
     var list = $('#historyList');
     if (!list) return;
@@ -1123,8 +1230,8 @@
         '<div class="bg-slate-900/80 border border-dashed border-slate-700 rounded-2xl p-6 text-center space-y-2">' +
           '<i class="fa-regular fa-clock text-2xl text-slate-600"></i>' +
           '<p class="text-[11px] text-slate-400">' +
-            (searchQuery.trim()
-              ? '「' + esc(searchQuery.trim()) + '」に一致する履歴はありません。'
+            (searchQuery.trim() || historyAppId !== 'all'
+              ? 'この条件に一致する履歴はありません。'
               : state.history.length
                 ? 'この条件に一致する履歴はありません。'
                 : '履歴はまだありません。指示書をコピーすると自動で保存されます。') +
@@ -1246,8 +1353,21 @@
       version: 1,
       exportedAt: new Date().toISOString(),
       apps: state.apps,
-      history: state.history
+      history: state.history,
+      template: state.template
     }, null, 2);
+  }
+
+  /* AR-6/AR-7: テンプレート編集欄の描画 */
+  function renderTemplateEditor() {
+    var sel = $('#tplType');
+    if (sel && !sel.options.length) {
+      sel.innerHTML = TYPES.map(function (t) {
+        return '<option value="' + esc(t) + '">' + esc(t) + ' のときに追加</option>';
+      }).join('');
+    }
+    $('#tplBase').value = state.template.constraints;
+    $('#tplByType').value = state.template.byType[sel.value] || '';
   }
 
   function renderStats() {
@@ -1284,7 +1404,11 @@
     var apps = Array.isArray(data.apps) ? data.apps.map(normalizeApp) : [];
     var history = Array.isArray(data.history) ? data.history.map(normalizeHistory) : [];
     if (!apps.length && !history.length) throw new Error('apps / history が見つかりません');
-    return { apps: apps, history: history };
+    return {
+      apps: apps,
+      history: history,
+      template: data.template ? normalizeTemplate(data.template) : null
+    };
   }
 
   function applyImport(raw, mode) {
@@ -1298,6 +1422,7 @@
     if (mode === 'replace') {
       state.apps = parsed.apps;
       state.history = parsed.history;
+      if (parsed.template) state.template = parsed.template;
     } else {
       var appIds = {};
       var appKeys = {};
@@ -1467,6 +1592,10 @@
         renderHistory();
       }, 200);
     });
+    $('#historyApp').addEventListener('change', function () {
+      historyAppId = $('#historyApp').value;
+      renderHistory();
+    });
     $('#historyFilter').addEventListener('click', function (ev) {
       var btn = ev.target.closest('[data-filter]');
       if (!btn) return;
@@ -1571,7 +1700,42 @@
     // 設定
     $('#btnSettings').addEventListener('click', function () {
       renderStats();
+      renderTemplateEditor();
       $('#settingsModal').hidden = false;
+    });
+    $('#tplType').addEventListener('change', function () {
+      $('#tplByType').value = state.template.byType[$('#tplType').value] || '';
+    });
+    var tplTimer = null;
+    function saveTemplate() {
+      if (tplTimer) clearTimeout(tplTimer);
+      tplTimer = setTimeout(function () {
+        state.template.constraints = $('#tplBase').value;
+        state.template.byType[$('#tplType').value] = $('#tplByType').value;
+        saveState();
+      }, 300);
+    }
+    $('#tplBase').addEventListener('input', saveTemplate);
+    $('#tplByType').addEventListener('input', saveTemplate);
+    $('#btnTplRecommend').addEventListener('click', function () {
+      TYPES.forEach(function (t) {
+        if (!String(state.template.byType[t] || '').trim()) {
+          state.template.byType[t] = RECOMMENDED_BY_TYPE[t] || '';
+        }
+      });
+      saveState();
+      renderTemplateEditor();
+      toast('種類ごとのおすすめを入れました');
+    });
+    $('#btnTplReset').addEventListener('click', function () {
+      askConfirm('テンプレートを既定に戻す', '共通の制約を初期状態に戻し、種類ごとの追加をすべて空にします。', '戻す')
+        .then(function (ok) {
+          if (!ok) return;
+          state.template = { constraints: DEFAULT_CONSTRAINTS, byType: emptyByType() };
+          saveState();
+          renderTemplateEditor();
+          toast('テンプレートを既定に戻しました');
+        });
     });
     $('#optPreview').addEventListener('change', function () {
       state.settings.preview = !!$('#optPreview').checked;
@@ -1620,7 +1784,9 @@
           state.draft = fresh.draft;
           state.filter = 'all';
           state.settings = fresh.settings;
+          state.template = fresh.template;
           searchQuery = '';
+          historyAppId = 'all';
           lastOutput = '';
           lastSavedHistoryId = '';
           $('#reqBody').value = '';
@@ -1636,7 +1802,9 @@
           renderComposeTarget();
           renderHistory();
           renderStats();
+          renderTemplateEditor();
           updateHistoryBadge();
+          updateAppBadges();
           $('#settingsModal').hidden = true;
           toast('初期状態に戻しました');
         });
