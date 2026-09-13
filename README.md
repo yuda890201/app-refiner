@@ -48,6 +48,7 @@ Gemini や @App Studio、Claude Code に渡して実行します。
 
 ## 設計上の約束ごと
 
+- **CSP で外部への送信を封じています**（`connect-src 'none'`）。実施するのはブラウザなので、コード側の見落としに依存しません。許可しているのは Tailwind / Font Awesome の CDN と、プレビュー用の iframe だけです。
 - `localStorage` の読み書きはすべて `try/catch`。失敗してもアプリは停止せず、警告バナーを出して一時保持に切り替わります。
 - プレビュー用 iframe は `sandbox="allow-scripts allow-popups allow-forms"`（同一オリジン権限を渡さない）。
   読み込めない場合は「プレビュー不可」を表示し、レイアウトは崩れません。

@@ -2,6 +2,15 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
+<!-- 外部への送信を封じる。実施するのはブラウザなので、コード側の見落としに依存しない。
+     connect-src 'none' で fetch / XHR / WebSocket / sendBeacon / EventSource が全部止まる。
+     許可しているのは、このアプリが実際に必要とするものだけ:
+       script-src  … Tailwind の CDN（本文のインラインスクリプトに 'unsafe-inline' が要る）
+       style-src   … Font Awesome の CDN（同上）
+       font-src    … Font Awesome のアイコンフォント
+       frame-src   … カードのプレビュー（利用者が登録した任意の https ページ）
+     CDN が読めない場合は .no-tw のフォールバックCSSに切り替わる（AR-10）。 -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' https://cdn.tailwindcss.com; style-src 'unsafe-inline' https://cdnjs.cloudflare.com; img-src data: blob:; font-src data: https://cdnjs.cloudflare.com; media-src data: blob:; connect-src 'none'; form-action 'none'; frame-src https:; object-src 'none'; base-uri 'none'">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="color-scheme" content="dark">
 <meta name="theme-color" content="#4338ca">

