@@ -1,166 +1,85 @@
-# タスク：App Studio 側（別リポジトリ / Cloud Run）
+# App Studio 側の状況（訂正版）
 
-対象: App Studio MCP サーバー（`server_cloudrun.py` 等 / Cloud Run `app-studio`）
-担当の想定: App Studio のリポジトリで作業する Claude Code、または @App Studio 自身
-関連: [../CONTEXT.md](../CONTEXT.md) ・ [app-refiner.md](app-refiner.md)
+最終更新: 2026-09-13
+関連: [../ARCHITECTURE.md](../ARCHITECTURE.md)
 
-> このファイルは App Refiner 本体の仕様ではなく、**App Studio への改修要望**です。
-> App Refiner が一度で公開できなかった根本原因はここにあります。
-> 承認URLに含まれるトークンなどの秘密情報は記載しません。
+> ## ⚠️ このファイルは一度書き直されています
+>
+> 初版には AS-1〜AS-6 という改良要望が並んでいましたが、**その多くは誤りでした。**
+> App Studio のデフォルトブランチ（`main`）しか見ずに書いたためです。
+>
+> 実際に稼働しているのは `claude/funny-hopper-e88v68` ブランチで、そちらには
+> 540件のテストを持つ成熟した MCP 実装があり、要望した内容の大半は
+> **すでに実装済み、または意図的に保留**されていました。
+>
+> 同じ間違いを繰り返さないため、経緯も含めて残します。
 
-App Refiner を App Studio で作ったときに実際に詰まった点を、作業フェーズごとに整理したものです。
+## 実際の構成
 
-| フェーズ | ID | 優先度 | 内容 |
-| --- | --- | --- | --- |
-| 入力 | AS-1 | 高 | 新規ツール `publish_custom_html`（任意の単一HTMLを直接デプロイ） |
-| 入力 | AS-5 | 高 | スキーマで表現できない仕様を、黙って劣化させずエラーにする |
-| 承認 | AS-3 | 高 | 承認通知が届かない問題の調査と承認待ち一覧ツール |
-| 承認 | AS-4 | 中 | 承認前に「何を公開しようとしているか」が分かるようにする |
-| 事後 | AS-6 | 中 | デプロイ後に公開URLの到達と内容一致を検証して返す |
-| 運用 | AS-2 | 高 | 稼働リビジョンの追従（5コミット遅れ）と、古いまま publish する際の警告 |
+`main` ブランチには PIN 認証つきの `/api/deploy` を持つ素の HTTP サーバー（`server.py`）
+しかありません。**MCP ではありません。** 稼働しているのは別ブランチです。
 
-**依存関係**: AS-1 が入るまで、App Refiner の改修は Claude Code 経由で直接コミットする運用になる。
-AS-1 が入れば、App Refiner が生成した指示書 → @App Studio → デプロイ、が1本の線でつながる。
+| 項目 | 内容 |
+| --- | --- |
+| 稼働ブランチ | `claude/funny-hopper-e88v68` |
+| Cloud Run | service `app-studio` / revision `app-studio-00034-bgp` |
+| GCP | project `yuda-store-ai-1788800335` / `asia-northeast1` |
+| 構成 | `asgi_app.py` + `core/*` + `mcp_server/*` + `notify/*` + `storage/*` |
+| テスト | 25ファイル・約540件 |
+| デプロイ | `scripts/deploy.ps1`（テスト実行 → デプロイ → 設定確認まで一括） |
 
----
+公開されている MCP ツールは15個（`check_configuration` / `check_deployment` /
+`list_app_templates` / `get_app_template` / `validate_app_schema` /
+`render_app_preview` / `get_app_schema` / `list_app_schemas` / `list_deployed_apps` /
+`get_deploy_status` / `get_submission_summary` / `list_submissions` /
+`save_app_schema` / `verify_submission_store` ほか）。
 
-## 背景と課題（共通）
+## 初版の要望が、実際にはどうだったか
 
-Cloud Run 上で稼働中の App Studio MCP サーバー（revision: `app-studio-00034-bgp`）は、
-`AppSchema`（フィールド定義）を受け取り、テンプレートからフォームHTMLを生成して GitHub Pages に公開する仕組み。
+| 初版で書いたこと | 実際 |
+| --- | --- |
+| AS-1 `publish_custom_html` を追加してほしい | **意図的に保留**。防御（CSP）だけ先に実装済み。詳細は下記 |
+| AS-2 稼働リビジョンの追従 | 5コミット遅れは事実。ただし `8969d19` で「古いコードで動いている」ことを承認画面に出す対応済み |
+| AS-3 承認通知が届かない | Web Push は実装済み。4つの失敗箇所のうち3つは検証済みで、`scripts/diagnose_push.ps1` で切り分けられる |
+| AS-4 承認前に中身が分かるように | 承認画面にプレビュー・リポジトリ名・公開/非公開の表示あり |
+| AS-5 スキーマ外の仕様を黙って劣化させるな | **これは有効な指摘**。ただし解決策は AS-1 の設計に含まれている |
+| AS-6 デプロイ後に到達と内容一致を検証 | `8ae1ad5` で**実装済み** |
 
-そのため、ユーザーが作成した高機能な単一HTML（カスタム JavaScript / SPA）を直接デプロイしたい場合、
-現行ツール（`save_app_schema` / `request_publish`）ではスキーマ制約に阻まれ、任意のHTMLを push できない。
+つまり残っているのは AS-1 と AS-5 で、しかもそれは「実装が足りない」のではなく
+**利用者の判断待ちで止まっていた**だけでした。
 
-実際、App Refiner の依頼では **リポジトリ作成・Pages 有効化・デプロイまでは成功した**ものの、
-公開されたのは入力項目4件・約2.7KB のフォームHTMLで、意図した司令塔アプリではなかった。
+## `publish_custom_html` の設計（向こうが既に書いたもの）
 
+設計書 `docs/DESIGN_MCP.md` の §10-15 にあります。要点だけ。
 
+- 任意HTMLを受け取るのは、PR #1 で自分が閉じたセキュリティホールを開け直す行為
+- 44KB のHTMLをスマホで読んで判断することはできない。承認が「押すだけ」になる
+- **静的解析を防御に使ってはいけない**（`window["fet"+"ch"]` で外れる）
+- 採った案: 公開HTMLの `<head>` 直後に CSP の meta を差し込み、**ブラウザに実施させる**
+- `harden()` が封じる（防御） / `audit()` が説明する（判断材料。防御ではない）
+- 「audit が難読化を見落とす」ことをテストで明示的に固定してある
 
-## AS-1 [高] 新規 MCP ツール `publish_custom_html` の追加
+`core/htmlaudit.py` は現在どこからも呼ばれていません。判断が出るまで待っている状態です。
 
-引数:
+## 利用者の判断（2026-09-13 決定）
 
-| 名前 | 必須 | 説明 |
-| --- | --- | --- |
-| `repo` | 必須 | 作成・更新する GitHub リポジトリ名 |
-| `html_content` | 必須 | デプロイする `index.html` の完全なコード |
-| `title` | 任意 | アプリのタイトル |
-| `commit_message` | 任意 | 省略時は `Deploy custom single-file app via App Studio` |
+1. ツールとして公開する → **はい**
+2. CSP を緩める経路 → **引数として用意する。既定は STRICT のまま**
+3. サイズ上限 → **256 KiB**
 
-動作フロー:
+詳細と、承認画面への要件は [../ARCHITECTURE.md](../ARCHITECTURE.md) の「決定事項」を参照。
 
-1. HTML 内容の基本検証（`<html` / `<body` を含むか、サイズ上限チェック等）
-2. 承認チケットを発行（`request_publish` と同じ安全設計。`approve_url` を返し、ユーザーの承認後に push）
-3. 承認後、GitHub API 経由でリポジトリを作成（存在しない場合）し、`index.html` をコミット＆プッシュ、
-   GitHub Pages を有効化
+## このセッションの関わり方
 
-## AS-2 [高] 稼働リビジョンの追従
+**App Studio のコードはこのセッションから変更しません。** 向こうのチャットが並行で
+作業中であり、当事者です。ブランチを分けてもCloud Runのサービス本体・Secret Manager・
+`app-studio-state` は共有で、何より同じ機能の二重実装になります。
 
-- 稼働中のコードは `origin/claude/funny-hopper-e88v68` より **5コミット遅れ**（`check_deployment` より）
-- Secret Manager の環境変数方式を維持したまま、最新コミットをビルド・デプロイする
-- `check_deployment` は遅れを検知できているのに、公開処理はそのまま進む。
-  **古い状態で `request_publish` / `publish_custom_html` を実行しようとしたら警告を返す**ようにする
+こちらの役割は、向こうが出した変更を**差分でレビューすること**です。
+手順は `.claude/skills/review-published-app/SKILL.md` にまとめてあります。
 
-## AS-3 [高] 承認フロー・通知の改善（今回実際に困った点）
+## 教訓
 
-- スマホで承認リクエストの通知が動作せず、サービスのURLを開いても承認待ちの状況を確認できなかった
-- 希望する改善:
-  - 承認待ち一覧を取得できるツール（例: `list_pending_approvals`）
-  - 承認完了後に「どのリポジトリに何バイトを push したか」を返す仕組み
-  - approve 画面のスマートフォン対応
-
-## AS-4 [中] 承認前に「何を公開しようとしているか」が分かるようにする
-
-今回、承認画面から得られた情報は `summary_ja` の「入力項目 4 件、HTML 2772 バイト」だけだった。
-これが**意図と違うものが生成されていたことを示す唯一のサイン**で、しかも気づきにくい。
-
-- 生成される HTML の先頭数行、またはプレビューURL をレスポンスに含める
-- **既存リポジトリを上書きする場合はその旨と差分を明示する**。
-  `app-refiner` は既に存在するリポジトリだったが、承認時にそれが分からなかった
-- サイズや項目数を、承認画面で目立つ位置に出す
-
-## AS-5 [高] スキーマで表現できない仕様を、黙って劣化させずエラーにする
-
-**今回いちばん問題だった点。** 44KB 相当の SPA 仕様を渡したにもかかわらず、App Studio は
-エラーを出さず「入力項目4件のフォーム」という別物を生成して正常終了した。
-黙って劣化させるため、承認画面を見ても取り違えに気づけない。
-
-期待する動作:
-
-- `save_app_schema` の段階で、スキーマに落とし込めない要求（カスタムJS / SPA / 独自UI）を検知したら
-  「この仕様は AppSchema では表現できません。`publish_custom_html` を使ってください」と失敗させる
-- 少なくとも、生成物が元の仕様を大幅に下回る場合（想定バイト数との乖離など）は警告を返す
-
-AS-1 が入っても、この検知がなければ同じ取り違えが再発する。**AS-1 とセットで扱うこと。**
-
-## AS-6 [中] デプロイ後に公開URLの到達と内容一致を検証して返す
-
-今回「デプロイできたのか分からない」状態になった直接の原因。push しただけで完了とせず、
-
-- GitHub Pages が実際に 200 を返すか
-- 配信されている内容が push したものと一致するか（ハッシュ比較など）
-
-を確認して結果に含める。これがあれば「成功したが中身が違う」と「まだ反映されていない」を区別できる。
-
-## 共通の制約
-
-- 既存の AppSchema 駆動型フォーム生成機能（`save_app_schema` / `request_publish`）は破壊しないこと
-- `GITHUB_TOKEN` や `ADMIN_PIN` 等の秘密情報は引き続き Secret Manager から安全に読み出すこと
-
-## 参考：今回の各種レスポンス（秘密情報は除去済み）
-
-```jsonc
-// check_deployment
-{
-  "service": "app-studio",
-  "revision": "app-studio-00034-bgp",
-  "on_cloud_run": true,
-  "git_branch": "claude/funny-hopper-e88v68",
-  "matches_origin": false,
-  "behind_by": 5
-}
-
-// request_publish（app-refiner の発行時）… approve_url のトークンは秘匿
-{
-  "ok": true,
-  "requested": true,
-  "status": "pending",
-  "summary_ja": "「App Refiner（ブラッシュアップ司令塔）」を public リポジトリ app-refiner として公開します（入力項目 4 件、HTML 2772 バイト、入力内容は保存しません）"
-}
-```
-
-（`summary_ja` の読み方については AS-4 を参照）
-
----
-
-## そのままコピーして渡せる依頼文（AS-1 + AS-5 + AS-2）
-
-```
-# App Studio 機能拡張指示書：カスタム単一HTML直接デプロイ
-
-App Studio MCP サーバー（server_cloudrun.py 等）に、新規 MCP ツール
-`publish_custom_html` を追加してください。
-
-* 引数: repo（必須）, html_content（必須）, title（任意）,
-  commit_message（任意・省略時は "Deploy custom single-file app via App Studio"）
-* 動作: HTML の基本検証（<html / <body を含むか、サイズ上限）→ 承認チケット発行
-  （request_publish と同じ安全設計で approve_url を返し、承認後に push）→
-  GitHub API でリポジトリを作成（なければ）し index.html をコミット＆プッシュ →
-  GitHub Pages を有効化
-
-あわせて、AppSchema では表現できない仕様（カスタムJS / SPA / 独自UI）を
-save_app_schema が受け取った場合、黙って簡易フォームに落とすのではなく
-「この仕様は AppSchema では表現できません。publish_custom_html を使ってください」と
-失敗させてください。今回、44KB 相当の SPA 仕様に対して入力項目4件・2772バイトの
-フォームが生成され、エラーも警告もないまま公開されました。
-
-さらに、稼働中の Cloud Run リビジョン app-studio-00034-bgp が
-origin/claude/funny-hopper-e88v68 より 5 コミット遅れているため、
-Secret Manager の環境変数方式を維持したまま最新コミットをビルド・デプロイしてください。
-
-## 制約
-* 既存の AppSchema 駆動型フォーム生成機能（save_app_schema / request_publish）は壊さないこと。
-* GITHUB_TOKEN や ADMIN_PIN 等の秘密情報は引き続き Secret Manager から読み出すこと。
-* 変更点を箇条書きで報告すること。
-```
+**デフォルトブランチだけを見て「実装されていない」と判断しない。**
+稼働中のコードがどのブランチかを最初に確かめること。
+`check_deployment` の `git_branch` がそれを教えてくれる。
