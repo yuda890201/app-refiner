@@ -310,6 +310,19 @@
       </div>
 
       <div class="space-y-2 border-t border-slate-800 pt-3">
+        <p class="text-[11px] font-semibold text-slate-300"><i class="fa-solid fa-layer-group mr-1"></i>アプリをまとめて追加</p>
+        <p class="text-[10px] text-slate-500 leading-relaxed">
+          リポジトリ名を1行ずつ。公開URLは自動で組み立てます。
+          <code class="text-slate-400">owner/repo</code> や公開URLをそのまま貼っても構いません。
+        </p>
+        <textarea id="bulkRepos" rows="4" placeholder="shift-management-app&#10;incentive-board&#10;kinko-app"
+          class="w-full bg-slate-950 border border-slate-700 focus:border-indigo-500 outline-none rounded-xl p-2.5 text-slate-100 text-[11px] resize-y"></textarea>
+        <button id="btnBulkAdd" type="button" class="w-full py-2.5 bg-indigo-600 active:bg-indigo-500 rounded-xl font-bold text-[11px]">
+          <i class="fa-solid fa-plus mr-1"></i>まとめて追加する
+        </button>
+      </div>
+
+      <div class="space-y-2 border-t border-slate-800 pt-3">
         <p class="text-[11px] font-semibold text-slate-300"><i class="fa-solid fa-file-pen mr-1"></i>指示書テンプレート</p>
         <p class="text-[10px] text-slate-500 leading-relaxed">
           指示書の「## 制約」に入る文章です。1行が1項目になります。空にするとその節は出力されません。
@@ -424,7 +437,16 @@
     'UI/UXを改善', 'スマホ最適化', '音声読み上げを追加', '入力履歴を保存',
     'バグ修正', '文言をわかりやすく', '表示速度を改善'
   ];
+  /* AR-3: 初期登録。運用中の店舗系アプリと、この司令塔アプリ自身。
+     他のアプリは設定の「まとめて追加」からリポジトリ名を並べれば登録できる。 */
   var DEFAULT_APPS = [
+    {
+      id: 'app_store_communication',
+      name: 'Store Communication',
+      repo: 'store-communication-app',
+      url: 'https://' + GH_USER + '.github.io/store-communication-app/',
+      memo: '店舗連絡。'
+    },
     {
       id: 'app_store_trouble_report',
       name: 'Store Trouble Report',
@@ -433,18 +455,11 @@
       memo: '店舗トラブル報告フォーム。'
     },
     {
-      id: 'app_my_instant_app',
-      name: 'My Instant App',
-      repo: 'my-instant-app',
-      url: 'https://' + GH_USER + '.github.io/my-instant-app/',
-      memo: 'App Studio で最初に作成したアプリ。'
-    },
-    {
-      id: 'app_app_studio_e2e_test',
-      name: 'App Studio E2E Test',
-      repo: 'app-studio-e2e-test',
-      url: 'https://' + GH_USER + '.github.io/app-studio-e2e-test/',
-      memo: 'App Studio の動作確認用。'
+      id: 'app_store_feedback',
+      name: 'Store Feedback',
+      repo: 'store-feedback',
+      url: 'https://' + GH_USER + '.github.io/store-feedback/',
+      memo: '店舗フィードバック。'
     },
     {
       id: 'app_app_refiner',
@@ -454,6 +469,29 @@
       memo: 'この司令塔アプリ自身。'
     }
   ];
+
+  /* リポジトリ名からアプリ名を作る: store-trouble-report → Store Trouble Report */
+  function nameFromRepo(repo) {
+    return String(repo || '').split(/[-_]+/).filter(Boolean).map(function (w) {
+      return w.charAt(0).toUpperCase() + w.slice(1);
+    }).join(' ');
+  }
+
+  /* 「まとめて追加」の1行を解釈する。リポジトリ名・owner/repo・公開URL のどれでも受ける */
+  function parseRepoLine(line) {
+    var t = String(line || '').trim();
+    if (!t) return null;
+    var m = t.match(/^https?:\/\/([a-z0-9-]+)\.github\.io\/([^/\s]+)/i);
+    if (m) return m[2];
+    m = t.match(/^https?:\/\/github\.com\/[^/\s]+\/([^/\s]+)/i);
+    if (m) return m[1].replace(/\.git$/, '');
+    if (t.indexOf('/') >= 0) {
+      var parts = t.split('/').filter(Boolean);
+      t = parts[parts.length - 1];
+    }
+    if (!/^[A-Za-z0-9._-]+$/.test(t)) return null;
+    return t;
+  }
 
   /* =========================================================
    * 小さなユーティリティ
@@ -1751,6 +1789,41 @@
       saveState();
       renderApps();
       toast(state.settings.preview ? 'プレビューを表示します' : 'プレビューを非表示にしました');
+    });
+    $('#btnBulkAdd').addEventListener('click', function () {
+      var lines = String($('#bulkRepos').value || '').split(/\r?\n/);
+      var added = 0, skipped = 0, invalid = 0;
+      lines.forEach(function (line) {
+        if (!line.trim()) return;
+        var repo = parseRepoLine(line);
+        if (!repo) { invalid++; return; }
+        var dup = state.apps.some(function (a) {
+          return a.repo.toLowerCase() === repo.toLowerCase();
+        });
+        if (dup) { skipped++; return; }
+        state.apps.push(normalizeApp({
+          name: nameFromRepo(repo),
+          repo: repo,
+          url: 'https://' + GH_USER + '.github.io/' + repo + '/',
+          memo: ''
+        }));
+        added++;
+      });
+      if (!added && !skipped && !invalid) {
+        toast('リポジトリ名を入力してください', 'warn');
+        return;
+      }
+      if (added) {
+        saveState();
+        renderApps();
+        renderComposeTarget();
+        renderStats();
+      }
+      $('#bulkRepos').value = '';
+      var msg = added + ' 件を追加しました';
+      if (skipped) msg += '（登録済み ' + skipped + ' 件は飛ばしました）';
+      if (invalid) msg += '（読めない行 ' + invalid + ' 件）';
+      toast(msg, added ? 'ok' : 'warn');
     });
     $('#btnExportFile').addEventListener('click', exportToFile);
     $('#btnExportCopy').addEventListener('click', function () {

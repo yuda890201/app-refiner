@@ -35,8 +35,13 @@ const ok = (n, c) => log.push((c ? 'PASS ' : 'FAIL ') + n);
 // STEP1: 初期アプリ4件（AR-3: app-refiner 自身を含む）
 const cards = await page.locator('[data-app-card]').count();
 ok('初期アプリ4件 (got ' + cards + ')', cards === 4);
-ok('初期登録に app-refiner を含む',
-  (await page.locator('[data-app-card]').allInnerTexts()).some(t => t.includes('app-refiner')));
+const initialTexts = await page.locator('[data-app-card]').allInnerTexts();
+ok('初期登録に app-refiner を含む', initialTexts.some(t => t.includes('app-refiner')));
+ok('AR-3 初期登録が店舗系アプリになっている',
+  initialTexts.some(t => t.includes('store-communication-app')) &&
+  initialTexts.some(t => t.includes('store-feedback')));
+ok('AR-3 テスト用アプリは外れている',
+  !initialTexts.some(t => t.includes('app-studio-e2e-test')));
 
 // プレビューボックス存在
 ok('プレビュー領域あり', await page.locator('.preview-box').count() === 4);
@@ -215,6 +220,31 @@ const exported = await page.inputValue('#exportText');
 let parsed = null; try { parsed = JSON.parse(exported); } catch {}
 ok('エクスポートJSONが妥当', !!parsed && parsed.apps.length === 5 && parsed.history.length >= 1);
 
+// AR-3: アプリのまとめて追加（リポジトリ名 / owner/repo / 公開URL の3形式）
+const beforeBulk = await page.locator('[data-app-card]').count();
+await page.fill('#bulkRepos',
+  'shift-management-app\nyuda890201/incentive-board\nhttps://yuda890201.github.io/kinko-app/\nstore-feedback\n!!!invalid!!!');
+await page.click('#btnBulkAdd');
+await page.waitForTimeout(600);
+const bulkToast = await page.locator('#toast').innerText();
+ok('まとめて追加: 3件追加された (' + bulkToast.replace(/\s+/g, ' ').trim() + ')', bulkToast.includes('3 件を追加'));
+ok('まとめて追加: 登録済みは飛ばす', bulkToast.includes('登録済み 1 件'));
+ok('まとめて追加: 読めない行を数える', bulkToast.includes('読めない行 1 件'));
+await page.locator('[data-close="settingsModal"]').first().click();
+await page.locator('.nav-btn[data-tab="tab-apps"]').click();
+await page.waitForTimeout(500);
+const afterBulk = await page.locator('[data-app-card]').count();
+ok('まとめて追加: カードが3件増えた (' + beforeBulk + ' → ' + afterBulk + ')', afterBulk === beforeBulk + 3);
+const bulkTexts = await page.locator('[data-app-card]').allInnerTexts();
+ok('まとめて追加: リポジトリ名からアプリ名を作る',
+  bulkTexts.some(t => t.includes('Shift Management App')));
+ok('まとめて追加: owner/repo 形式を解釈する',
+  bulkTexts.some(t => t.includes('incentive-board')));
+ok('まとめて追加: 公開URL形式を解釈する',
+  bulkTexts.some(t => t.includes('kinko-app')));
+await page.click('#btnSettings');
+await page.waitForTimeout(300);
+
 // AR-6: 指示書テンプレート（制約）の編集
 await page.fill('#tplBase', '* 既存の機能を壊さないこと。\n* 追加した独自ルール。');
 await page.waitForTimeout(500);
@@ -269,13 +299,14 @@ ok('AR-6 既定に戻すと従来の出力',
 await page.click('#btnSettings');
 await page.waitForTimeout(300);
 
-// AR-2: プレビュー表示トグル
+// AR-2: プレビュー表示トグル（カード数は先行するテストで変動するので相対で見る）
+const cardsNow = await page.locator('[data-app-card]').count();
 await page.uncheck('#optPreview');
 await page.waitForTimeout(400);
 ok('AR-2 トグルOFFでプレビュー非表示', await page.locator('.preview-box').count() === 0);
 await page.check('#optPreview');
 await page.waitForTimeout(400);
-ok('AR-2 トグルONで復帰', await page.locator('.preview-box').count() === 5);
+ok('AR-2 トグルONで復帰 (' + cardsNow + '件)', await page.locator('.preview-box').count() === cardsNow);
 
 // インポート（置き換え）
 const payload = JSON.stringify({ app: 'app-refiner', version: 1, apps: [{ id: 'x1', name: 'Imported', repo: 'imported-app', url: 'https://example.com/', memo: 'm' }], history: [] });

@@ -27,7 +27,7 @@ App Refiner（ブラッシュアップ司令塔）のリポジトリです。作
 
 ```bash
 npx http-server . -p 8899 --silent
-node tests/smoke.mjs      # 68項目のスモークテスト。機能を追加したらここにも追記する
+node tests/smoke.mjs      # 77項目のスモークテスト。機能を追加したらここにも追記する
 ```
 
 ポートは環境変数 `PORT` で変えられる（`scripts/Invoke-AppRefinerCheck.ps1 -RunTests` が利用）。
