@@ -14,7 +14,8 @@
   body { -webkit-tap-highlight-color: transparent; }
   .safe-b { padding-bottom: calc(env(safe-area-inset-bottom, 0px)); }
   /* カード内 iframe プレビュー：実機幅 390px で描画したものを縮小表示する */
-  .preview-box { position: relative; overflow: hidden; background: #020617; }
+  /* AR-9: 相手ページを判別できる高さを確保する。Tailwind の有無に左右されないよう自前で指定 */
+  .preview-box { position: relative; overflow: hidden; background: #020617; height: 192px; }
   .preview-box iframe {
     position: absolute; top: 0; left: 0;
     width: 390px; height: 720px; border: 0;
@@ -34,6 +35,38 @@
   .scroll-x::-webkit-scrollbar { display: none; }
   #outputText { white-space: pre-wrap; word-break: break-word; }
   dialog::backdrop { background: rgba(2, 6, 23, .78); }
+
+  /* ===== AR-10: Tailwind CDN に到達できないときの最低限のフォールバック =====
+     読み込みに成功した場合は html に .no-tw が付かないので、これらは一切適用されない。 */
+  .no-tw body { background: #020617; color: #f1f5f9; margin: 0;
+    font-family: system-ui, -apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif; line-height: 1.6; }
+  .no-tw header { background: #4338ca; color: #fff; padding: 12px 16px; }
+  .no-tw header h1 { margin: 0; font-size: 16px; }
+  .no-tw header p { margin: 0; font-size: 11px; opacity: .85; }
+  .no-tw main { max-width: 480px; margin: 0 auto; padding: 16px 16px 104px; }
+  .no-tw h2 { font-size: 15px; margin: 20px 0 8px; }
+  .no-tw article, .no-tw #composeTarget > div, .no-tw section > div > div {
+    background: #0f172a; border: 1px solid #1e293b; border-radius: 14px; padding: 14px; margin-bottom: 12px; }
+  .no-tw button, .no-tw select { background: #1e293b; color: #f1f5f9; border: 1px solid #334155;
+    border-radius: 10px; padding: 10px 12px; margin: 3px 3px 3px 0; }
+  .no-tw button:disabled { opacity: .4; }
+  .no-tw input, .no-tw textarea { display: block; width: 100%; box-sizing: border-box;
+    background: #020617; color: #f1f5f9; border: 1px solid #334155; border-radius: 10px; padding: 10px; }
+  .no-tw select { width: 100%; }
+  .no-tw a { color: #a5b4fc; }
+  .no-tw pre { background: #020617; border: 1px solid #1e293b; border-radius: 10px;
+    padding: 12px; overflow: auto; max-height: 60vh; }
+  .no-tw nav { position: fixed; left: 0; right: 0; bottom: 0; background: #0f172a;
+    border-top: 1px solid #1e293b; }
+  .no-tw nav > div { display: flex; max-width: 480px; margin: 0 auto; }
+  .no-tw nav button { flex: 1; margin: 0; border: 0; border-radius: 0; }
+  .no-tw #appModal, .no-tw #settingsModal, .no-tw #confirmModal {
+    position: fixed; inset: 0; z-index: 50; overflow: auto;
+    background: rgba(2, 6, 23, .94); padding: 16px; }
+  .no-tw #toast { position: fixed; left: 16px; right: 16px; bottom: 80px; z-index: 60;
+    background: #064e3b; border: 1px solid #10b981; border-radius: 10px; padding: 10px 12px; }
+  .no-tw .preview-box { border-bottom: 1px solid #1e293b; }
+  .no-tw [hidden] { display: none !important; }
 </style>
 </head>
 <body class="bg-slate-950 text-slate-100 min-h-screen font-sans antialiased">
@@ -120,6 +153,16 @@
       </div>
     </div>
 
+    <label id="includeHistoryWrap" class="flex items-start gap-2.5 bg-slate-900/80 border border-slate-800 rounded-2xl p-3.5">
+      <input id="includeHistory" type="checkbox" class="w-4 h-4 mt-0.5 accent-indigo-500 shrink-0">
+      <span class="min-w-0">
+        <span class="block text-[11px] font-semibold text-slate-300">これまでの改修履歴を含める</span>
+        <span id="includeHistoryHint" class="block text-[10px] text-slate-500 leading-relaxed">
+          このアプリへの直近3件の依頼を指示書に添えて、既存機能を壊しにくくします。
+        </span>
+      </span>
+    </label>
+
     <button id="btnGenerate" type="button"
       class="w-full py-3.5 bg-indigo-600 active:bg-indigo-500 disabled:opacity-40 disabled:active:bg-indigo-600 font-bold rounded-2xl shadow-lg text-sm">
       <i class="fa-solid fa-file-lines mr-1.5"></i>指示書を生成
@@ -158,6 +201,11 @@
         class="text-[11px] font-bold bg-slate-800 active:bg-slate-700 border border-slate-700 px-3 py-1.5 rounded-lg">
         <i class="fa-regular fa-trash-can mr-1"></i>全削除
       </button>
+    </div>
+    <div class="relative">
+      <input id="historySearch" type="search" inputmode="search" placeholder="アプリ名・要望の本文で検索"
+        class="w-full bg-slate-900 border border-slate-800 focus:border-indigo-500 outline-none rounded-xl py-2.5 pl-9 pr-3 text-slate-100">
+      <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 text-xs"></i>
     </div>
     <div id="historyFilter" class="flex gap-2 overflow-x-auto scroll-x pb-1"></div>
     <div id="historyList" class="space-y-3"></div>
@@ -251,6 +299,19 @@
       </div>
 
       <div class="space-y-2 border-t border-slate-800 pt-3">
+        <p class="text-[11px] font-semibold text-slate-300"><i class="fa-solid fa-display mr-1"></i>表示</p>
+        <label class="flex items-start gap-2.5">
+          <input id="optPreview" type="checkbox" class="w-4 h-4 mt-0.5 accent-indigo-500 shrink-0">
+          <span class="min-w-0">
+            <span class="block text-[11px] font-semibold text-slate-300">カードのプレビューを表示する</span>
+            <span class="block text-[10px] text-slate-500 leading-relaxed">
+              オフにすると各アプリの公開ページを読み込まなくなり、通信量を抑えられます。
+            </span>
+          </span>
+        </label>
+      </div>
+
+      <div class="space-y-2 border-t border-slate-800 pt-3">
         <p class="text-[11px] font-semibold text-slate-300"><i class="fa-solid fa-file-import mr-1"></i>インポート</p>
         <input id="importFile" type="file" accept="application/json,.json"
           class="w-full text-[11px] text-slate-400 file:mr-2 file:py-2 file:px-3 file:rounded-lg file:border-0 file:bg-slate-800 file:text-slate-200 file:font-bold">
@@ -328,6 +389,13 @@
       repo: 'app-studio-e2e-test',
       url: 'https://' + GH_USER + '.github.io/app-studio-e2e-test/',
       memo: 'App Studio の動作確認用。'
+    },
+    {
+      id: 'app_app_refiner',
+      name: 'App Refiner',
+      repo: 'app-refiner',
+      url: 'https://' + GH_USER + '.github.io/app-refiner/',
+      memo: 'この司令塔アプリ自身。'
     }
   ];
 
@@ -366,9 +434,11 @@
     apps: [],
     history: [],
     selectedId: '',
-    draft: { type: 'UI改善', priority: '中', body: '' },
-    filter: 'all'
+    draft: { type: 'UI改善', priority: '中', body: '', includeHistory: false },
+    filter: 'all',
+    settings: { preview: true }
   };
+  var searchQuery = ''; // 検索語は保存しない（開くたびにリセット）
   var lastOutput = '';
   var lastSavedHistoryId = '';
   var editingAppId = '';
@@ -416,8 +486,9 @@
       apps: DEFAULT_APPS.map(normalizeApp),
       history: [],
       selectedId: DEFAULT_APPS[0].id,
-      draft: { type: 'UI改善', priority: '中', body: '' },
-      filter: 'all'
+      draft: { type: 'UI改善', priority: '中', body: '', includeHistory: false },
+      filter: 'all',
+      settings: { preview: true }
     };
   }
 
@@ -445,9 +516,13 @@
         draft: {
           type: TYPES.indexOf(draft.type) >= 0 ? draft.type : 'UI改善',
           priority: PRIORITIES.indexOf(draft.priority) >= 0 ? draft.priority : '中',
-          body: String(draft.body == null ? '' : draft.body)
+          body: String(draft.body == null ? '' : draft.body),
+          includeHistory: !!draft.includeHistory
         },
-        filter: ['all', 'open', 'done'].indexOf(parsed.filter) >= 0 ? parsed.filter : 'all'
+        filter: ['all', 'open', 'done'].indexOf(parsed.filter) >= 0 ? parsed.filter : 'all',
+        settings: {
+          preview: !(parsed.settings && parsed.settings.preview === false)
+        }
       };
     } catch (e) {
       return seed();
@@ -464,7 +539,8 @@
         history: state.history,
         selectedId: state.selectedId,
         draft: state.draft,
-        filter: state.filter
+        filter: state.filter,
+        settings: state.settings
       }));
       return true;
     } catch (e) {
@@ -562,7 +638,21 @@
   /* =========================================================
    * 指示書テキストの組み立て
    * =======================================================*/
-  function buildInstruction(app, type, priority, body) {
+  /* AR-12: 直近の依頼を1行ずつに畳む。指示書へ添える文脈として使う */
+  function recentHistoryLines(appId, limit) {
+    var out = [];
+    for (var i = 0; i < state.history.length && out.length < limit; i++) {
+      var h = state.history[i];
+      if (h.appId !== appId) continue;
+      var summary = String(h.body || '').replace(/\s+/g, ' ').trim();
+      if (summary.length > 60) summary = summary.slice(0, 60) + '…';
+      out.push('* ' + fmtDate(h.at) + ' ' + h.type + '（優先度 ' + h.priority + '）' +
+        (h.done ? ' / 対応済み' : ' / 未対応') + ': ' + (summary || '(本文なし)'));
+    }
+    return out;
+  }
+
+  function buildInstruction(app, type, priority, body, historyLines) {
     app = app || {};
     var lines = [];
     lines.push('@App Studio');
@@ -573,6 +663,11 @@
     lines.push('');
     lines.push('## 改修要望');
     lines.push(String(body == null ? '' : body).trim());
+    if (historyLines && historyLines.length) {
+      lines.push('');
+      lines.push('## これまでの改修依頼');
+      lines.push.apply(lines, historyLines);
+    }
     lines.push('');
     lines.push('## 制約');
     lines.push('* 既存の機能を壊さないこと。');
@@ -612,6 +707,46 @@
     return null;
   }
 
+  /* AR-11: そのアプリに紐づく未対応履歴の件数 */
+  function openCountOf(appId) {
+    var n = 0;
+    for (var i = 0; i < state.history.length; i++) {
+      if (!state.history[i].done && state.history[i].appId === appId) n++;
+    }
+    return n;
+  }
+
+  function openCountBadge(appId) {
+    var n = openCountOf(appId);
+    return '<span data-open-count class="text-[9px] font-bold bg-amber-500/20 text-amber-300 ' +
+      'border border-amber-500/40 px-2 py-0.5 rounded-full"' + (n ? '' : ' hidden') + '>未対応 ' + n + '</span>';
+  }
+
+  function updateAppBadges() {
+    $$('#appList [data-app-card]').forEach(function (card) {
+      var badge = card.querySelector('[data-open-count]');
+      if (!badge) return;
+      var n = openCountOf(card.getAttribute('data-app-card'));
+      badge.textContent = '未対応 ' + n;
+      badge.hidden = n === 0;
+    });
+  }
+
+  /* AR-9 / AR-2: プレビュー枠。高さを確保しつつ、再読み込みボタンとURLラベルを重ねる */
+  function previewBlock(app) {
+    if (!state.settings.preview) return '';
+    return '<div class="relative">' +
+        '<div class="preview-box" data-preview data-url="' + esc(app.url) + '"></div>' +
+        (isHttpUrl(app.url)
+          ? '<button type="button" data-act="reload-preview" aria-label="プレビューを再読み込み" ' +
+            'class="absolute top-2 right-2 w-8 h-8 rounded-full bg-slate-950/80 border border-slate-700 ' +
+            'text-slate-300 active:bg-slate-800"><i class="fa-solid fa-rotate-right text-xs"></i></button>'
+          : '') +
+        '<p class="absolute inset-x-0 bottom-0 bg-slate-950/85 px-2.5 py-1 text-[9px] font-mono ' +
+          'text-slate-400 truncate">' + esc(app.url || '公開URL未設定') + '</p>' +
+      '</div>';
+  }
+
   function renderApps() {
     var list = $('#appList');
     if (!list) return;
@@ -639,7 +774,7 @@
         '<article data-app-card="' + esc(app.id) + '" class="bg-slate-900/80 border ' +
           (selected ? 'border-indigo-500 ring-2 ring-indigo-500/40' : 'border-slate-800') +
           ' rounded-2xl overflow-hidden shadow">' +
-          '<div class="preview-box h-28" data-preview data-url="' + esc(app.url) + '"></div>' +
+          previewBlock(app) +
           '<div class="p-3.5 space-y-2">' +
             '<div class="flex items-start justify-between gap-2">' +
               '<div class="min-w-0">' +
@@ -647,12 +782,18 @@
                 '<p class="text-[10px] text-slate-400 font-mono truncate">' +
                   '<i class="fa-brands fa-github mr-1"></i>' + esc(app.repo || '(リポジトリ未設定)') + '</p>' +
               '</div>' +
-              '<span data-selected-mark class="shrink-0 text-[9px] font-bold bg-indigo-500/20 text-indigo-300 ' +
-                'border border-indigo-500/40 px-2 py-0.5 rounded-full"' + (selected ? '' : ' hidden') + '>選択中</span>' +
+              '<div class="shrink-0 flex flex-col items-end gap-1">' +
+                '<span data-selected-mark class="text-[9px] font-bold bg-indigo-500/20 text-indigo-300 ' +
+                  'border border-indigo-500/40 px-2 py-0.5 rounded-full"' + (selected ? '' : ' hidden') + '>選択中</span>' +
+                openCountBadge(app.id) +
+              '</div>' +
             '</div>' +
-            (app.url
-              ? '<p class="text-[10px] text-indigo-300/90 font-mono truncate">' + esc(app.url) + '</p>'
-              : '<p class="text-[10px] text-slate-600 font-mono">公開URL未設定</p>') +
+            // プレビュー表示中はその下端にURLを重ねているので、本文側では重複させない
+            (state.settings.preview
+              ? ''
+              : app.url
+                ? '<p class="text-[10px] text-indigo-300/90 font-mono truncate">' + esc(app.url) + '</p>'
+                : '<p class="text-[10px] text-slate-600 font-mono">公開URL未設定</p>') +
             (app.memo
               ? '<p class="text-[11px] text-slate-400 line-clamp-2 whitespace-pre-wrap">' + esc(app.memo) + '</p>'
               : '') +
@@ -879,9 +1020,11 @@
     state.draft.type = $('#reqType').value;
     state.draft.priority = $('#reqPriority').value;
     state.draft.body = $('#reqBody').value;
+    state.draft.includeHistory = !!$('#includeHistory').checked;
     saveState();
 
-    lastOutput = buildInstruction(app, state.draft.type, state.draft.priority, body);
+    lastOutput = buildInstruction(app, state.draft.type, state.draft.priority, body,
+      state.draft.includeHistory ? recentHistoryLines(app.id, 3) : null);
     lastSavedHistoryId = '';
     $('#outputText').textContent = lastOutput;
     $('#outputWrap').hidden = false;
@@ -916,6 +1059,7 @@
     saveState();
     renderHistory();
     updateHistoryBadge();
+    updateAppBadges();
     return item;
   }
 
@@ -929,20 +1073,30 @@
   ];
 
   function filteredHistory() {
+    var q = searchQuery.trim().toLowerCase();
     return state.history.filter(function (h) {
-      if (state.filter === 'open') return !h.done;
-      if (state.filter === 'done') return !!h.done;
-      return true;
+      if (state.filter === 'open' && h.done) return false;
+      if (state.filter === 'done' && !h.done) return false;
+      if (!q) return true;
+      return (h.appName + ' ' + h.repo + ' ' + h.body + ' ' + h.type + ' ' + h.priority)
+        .toLowerCase().indexOf(q) >= 0;
     });
   }
 
   function renderHistoryFilter() {
     var el = $('#historyFilter');
     if (!el) return;
+    var q = searchQuery.trim().toLowerCase();
+    var scoped = q
+      ? state.history.filter(function (h) {
+          return (h.appName + ' ' + h.repo + ' ' + h.body + ' ' + h.type + ' ' + h.priority)
+            .toLowerCase().indexOf(q) >= 0;
+        })
+      : state.history;
     var counts = {
-      all: state.history.length,
-      open: state.history.filter(function (h) { return !h.done; }).length,
-      done: state.history.filter(function (h) { return !!h.done; }).length
+      all: scoped.length,
+      open: scoped.filter(function (h) { return !h.done; }).length,
+      done: scoped.filter(function (h) { return !!h.done; }).length
     };
     el.innerHTML = FILTERS.map(function (f) {
       var on = state.filter === f.key;
@@ -969,7 +1123,11 @@
         '<div class="bg-slate-900/80 border border-dashed border-slate-700 rounded-2xl p-6 text-center space-y-2">' +
           '<i class="fa-regular fa-clock text-2xl text-slate-600"></i>' +
           '<p class="text-[11px] text-slate-400">' +
-            (state.history.length ? 'この条件に一致する履歴はありません。' : '履歴はまだありません。指示書をコピーすると自動で保存されます。') +
+            (searchQuery.trim()
+              ? '「' + esc(searchQuery.trim()) + '」に一致する履歴はありません。'
+              : state.history.length
+                ? 'この条件に一致する履歴はありません。'
+                : '履歴はまだありません。指示書をコピーすると自動で保存されます。') +
           '</p></div>';
       return;
     }
@@ -1006,6 +1164,8 @@
               '<i class="fa-regular fa-copy mr-1"></i>再コピー</button>' +
             '<button type="button" data-act="delete" class="py-2.5 bg-slate-800 active:bg-rose-600/40 border border-slate-700 text-rose-300 rounded-xl font-bold text-[11px]">' +
               '<i class="fa-regular fa-trash-can mr-1"></i>削除</button>' +
+            '<button type="button" data-act="reuse" class="col-span-3 py-2.5 bg-slate-800 active:bg-indigo-600 border border-slate-700 rounded-xl font-bold text-[11px]">' +
+              '<i class="fa-solid fa-rotate-left mr-1"></i>この内容で再依頼</button>' +
           '</div>' +
         '</article>';
     }).join('');
@@ -1202,6 +1362,11 @@
       var actEl = ev.target.closest('[data-act]');
       var act = actEl ? actEl.getAttribute('data-act') : 'select-card';
 
+      if (act === 'reload-preview') {
+        var box = card.querySelector('.preview-box');
+        if (box) { mountPreview(box); toast('プレビューを再読み込みしています'); }
+        return;
+      }
       if (act === 'edit') {
         openAppModal(app);
       } else if (act === 'delete') {
@@ -1223,12 +1388,14 @@
         saveState();
         updateAppSelectionUI();
         renderComposeTarget();
+        updateIncludeHistoryHint();
         setTab('tab-compose');
       } else {
         state.selectedId = id;
         saveState();
         updateAppSelectionUI();
         renderComposeTarget();
+        updateIncludeHistoryHint();
       }
     });
 
@@ -1266,6 +1433,12 @@
       saveState();
     });
 
+    $('#includeHistory').addEventListener('change', function () {
+      state.draft.includeHistory = !!$('#includeHistory').checked;
+      saveState();
+      updateIncludeHistoryHint();
+    });
+
     // ステップ3：生成・コピー
     $('#btnGenerate').addEventListener('click', generate);
     $('#btnCopy').addEventListener('click', function () {
@@ -1286,6 +1459,14 @@
     });
 
     // ステップ4：履歴
+    var searchTimer = null;
+    $('#historySearch').addEventListener('input', function () {
+      if (searchTimer) clearTimeout(searchTimer);
+      searchTimer = setTimeout(function () {
+        searchQuery = $('#historySearch').value;
+        renderHistory();
+      }, 200);
+    });
     $('#historyFilter').addEventListener('click', function (ev) {
       var btn = ev.target.closest('[data-filter]');
       if (!btn) return;
@@ -1306,6 +1487,26 @@
         copyText(item.text).then(function (ok) {
           toast(ok ? 'コピーしました' : 'コピーできませんでした。全文を長押しで選択してください', ok ? 'ok' : 'warn');
         });
+      } else if (act === 'reuse') {
+        var exists = state.apps.some(function (a) { return a.id === item.appId; });
+        if (exists) state.selectedId = item.appId;
+        state.draft.type = item.type;
+        state.draft.priority = item.priority;
+        state.draft.body = item.body;
+        $('#reqBody').value = item.body;
+        $('#reqType').value = item.type;
+        $('#reqPriority').value = item.priority;
+        updateBodyCount();
+        lastOutput = '';
+        lastSavedHistoryId = '';
+        $('#outputWrap').hidden = true;
+        saveState();
+        updateAppSelectionUI();
+        renderComposeTarget();
+        updateIncludeHistoryHint();
+        setTab('tab-compose');
+        toast(exists ? '入力欄に復元しました' : '入力欄に復元しました（対象アプリは削除済みです）',
+          exists ? 'ok' : 'warn');
       } else if (act === 'delete') {
         askConfirm('履歴を削除', fmtDate(item.at) + ' の「' + item.appName + '」への依頼を削除します。', '削除する')
           .then(function (ok) {
@@ -1316,6 +1517,7 @@
             renderHistory();
             renderStats();
             updateHistoryBadge();
+            updateAppBadges();
             toast('履歴を削除しました');
           });
       }
@@ -1332,6 +1534,7 @@
       renderHistory();
       renderStats();
       updateHistoryBadge();
+      updateAppBadges();
       toast(item.done ? '対応済みにしました' : '未対応に戻しました');
     });
     $('#btnClearHistory').addEventListener('click', function () {
@@ -1345,6 +1548,7 @@
           renderHistory();
           renderStats();
           updateHistoryBadge();
+          updateAppBadges();
           toast('履歴をすべて削除しました');
         });
     });
@@ -1368,6 +1572,12 @@
     $('#btnSettings').addEventListener('click', function () {
       renderStats();
       $('#settingsModal').hidden = false;
+    });
+    $('#optPreview').addEventListener('change', function () {
+      state.settings.preview = !!$('#optPreview').checked;
+      saveState();
+      renderApps();
+      toast(state.settings.preview ? 'プレビューを表示します' : 'プレビューを非表示にしました');
     });
     $('#btnExportFile').addEventListener('click', exportToFile);
     $('#btnExportCopy').addEventListener('click', function () {
@@ -1409,11 +1619,17 @@
           state.selectedId = fresh.selectedId;
           state.draft = fresh.draft;
           state.filter = 'all';
+          state.settings = fresh.settings;
+          searchQuery = '';
           lastOutput = '';
           lastSavedHistoryId = '';
           $('#reqBody').value = '';
+          $('#historySearch').value = '';
+          $('#includeHistory').checked = false;
+          $('#optPreview').checked = true;
           $('#outputWrap').hidden = true;
           updateBodyCount();
+          updateIncludeHistoryHint();
           renderSelectOptions();
           saveState();
           renderApps();
@@ -1451,6 +1667,46 @@
     });
   }
 
+  /* AR-12: 選択中アプリに何件の履歴が添えられるかを出す */
+  function updateIncludeHistoryHint() {
+    var hint = $('#includeHistoryHint');
+    if (!hint) return;
+    var app = getSelectedApp();
+    var n = app ? recentHistoryLines(app.id, 3).length : 0;
+    hint.textContent = n
+      ? 'このアプリへの直近 ' + n + ' 件の依頼を指示書に添えます。'
+      : 'このアプリの履歴はまだないため、添える内容はありません。';
+  }
+
+  /* AR-10: Tailwind CDN が読めたかを判定し、読めていなければフォールバックCSSを有効にする */
+  function detectTailwind() {
+    var probe = document.createElement('div');
+    probe.className = 'bg-slate-950';
+    probe.style.position = 'fixed';
+    probe.style.left = '-9999px';
+    probe.style.top = '0';
+    probe.setAttribute('aria-hidden', 'true');
+    document.body.appendChild(probe);
+    var ok = false;
+    try {
+      ok = window.getComputedStyle(probe).backgroundColor === 'rgb(2, 6, 23)';
+    } catch (e) { ok = false; }
+    try { probe.remove(); } catch (e) {}
+    document.documentElement.classList.toggle('no-tw', !ok);
+    return ok;
+  }
+
+  function watchTailwind() {
+    if (detectTailwind()) return;
+    // CDN の読み込みが遅れている場合に備えて数回だけ再判定する
+    var tries = 0;
+    var timer = setInterval(function () {
+      tries++;
+      if (detectTailwind() || tries >= 8) clearInterval(timer);
+    }, 500);
+    window.addEventListener('load', function () { detectTailwind(); });
+  }
+
   /* =========================================================
    * 初期化
    * =======================================================*/
@@ -1464,15 +1720,19 @@
     }
     renderSelectOptions();
     $('#reqBody').value = state.draft.body || '';
+    $('#includeHistory').checked = !!state.draft.includeHistory;
+    $('#optPreview').checked = state.settings.preview !== false;
     updateBodyCount();
     renderPresets();
     renderApps();
     renderComposeTarget();
+    updateIncludeHistoryHint();
     renderHistory();
     renderStats();
     updateHistoryBadge();
     bindEvents();
     setTab('tab-apps');
+    watchTailwind();
   }
 
   if (document.readyState === 'loading') {

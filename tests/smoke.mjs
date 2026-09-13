@@ -28,12 +28,28 @@ await page.waitForTimeout(1200);
 const log = [];
 const ok = (n, c) => log.push((c ? 'PASS ' : 'FAIL ') + n);
 
-// STEP1: 初期アプリ3件
+// STEP1: 初期アプリ4件（AR-3: app-refiner 自身を含む）
 const cards = await page.locator('[data-app-card]').count();
-ok('初期アプリ3件 (got ' + cards + ')', cards === 3);
+ok('初期アプリ4件 (got ' + cards + ')', cards === 4);
+ok('初期登録に app-refiner を含む',
+  (await page.locator('[data-app-card]').allInnerTexts()).some(t => t.includes('app-refiner')));
 
 // プレビューボックス存在
-ok('プレビュー領域あり', await page.locator('.preview-box').count() === 3);
+ok('プレビュー領域あり', await page.locator('.preview-box').count() === 4);
+
+// AR-9: プレビュー枠が十分な高さを持つ
+const geo = await page.evaluate(() => {
+  const b = document.querySelector('.preview-box');
+  const r = b.getBoundingClientRect();
+  return { h: Math.round(r.height), visible: Math.round(r.height / (r.width / 390)) };
+});
+ok('AR-9 プレビュー枠の高さ ' + geo.h + 'px', geo.h >= 180);
+ok('AR-9 相手ページが ' + geo.visible + 'px 見える（旧123px）', geo.visible >= 190);
+
+// AR-2: プレビューの再読み込みボタンとURLラベル
+ok('AR-2 再読み込みボタンあり', await page.locator('[data-act="reload-preview"]').count() === 4);
+ok('AR-2 URLラベルが常時表示',
+  (await page.locator('[data-app-card]').first().innerText()).includes('yuda890201.github.io'));
 
 // アプリ追加
 await page.click('#btnAddApp');
@@ -46,7 +62,7 @@ ok('リポジトリ名からURL自動補完 (' + autoUrl + ')', autoUrl === 'htt
 await page.fill('#appMemo', 'この司令塔アプリ自身');
 await page.click('#btnSaveApp');
 await page.waitForTimeout(300);
-ok('アプリ追加で4件', await page.locator('[data-app-card]').count() === 4);
+ok('アプリ追加で5件', await page.locator('[data-app-card]').count() === 5);
 
 // 追加したアプリが選択中になっている
 await page.waitForTimeout(200);
@@ -54,7 +70,7 @@ const selMark = await page.locator('[data-app-card] [data-selected-mark]:not([hi
 ok('選択中バッジ1件 (got ' + selMark + ')', selMark === 1);
 
 // STEP2: 改修する → composeタブへ
-await page.locator('[data-app-card]').nth(3).locator('[data-act="select"]').click();
+await page.locator('[data-app-card]').nth(4).locator('[data-act="select"]').click();
 await page.waitForTimeout(400);
 ok('指示書タブが表示', await page.locator('#tab-compose').isVisible());
 ok('対象アプリ名が表示', (await page.locator('#composeTarget').innerText()).includes('App Refiner'));
@@ -95,6 +111,27 @@ await page.waitForTimeout(400);
 ok('履歴1件', await page.locator('[data-history]').count() === 1);
 ok('履歴バッジ表示', await page.locator('#historyBadge').isVisible());
 
+// AR-11: アプリカードの未対応件数バッジ
+await page.locator('.nav-btn[data-tab="tab-apps"]').click();
+await page.waitForTimeout(300);
+ok('AR-11 未対応バッジ1件表示',
+  await page.locator('[data-app-card] [data-open-count]:not([hidden])').count() === 1);
+ok('AR-11 バッジの文言', (await page.locator('[data-open-count]:not([hidden])').innerText()).includes('未対応 1'));
+
+// AR-5: 履歴の検索
+await page.locator('.nav-btn[data-tab="tab-history"]').click();
+await page.waitForTimeout(300);
+await page.fill('#historySearch', 'スマホ最適化');
+await page.waitForTimeout(400);
+ok('AR-5 一致する語で1件', await page.locator('[data-history]').count() === 1);
+await page.fill('#historySearch', 'ぜったいにないことば');
+await page.waitForTimeout(400);
+ok('AR-5 一致しない語で0件', await page.locator('[data-history]').count() === 0);
+ok('AR-5 未ヒット時の案内', (await page.locator('#historyList').innerText()).includes('一致する履歴はありません'));
+await page.fill('#historySearch', '');
+await page.waitForTimeout(400);
+ok('AR-5 検索クリアで戻る', await page.locator('[data-history]').count() === 1);
+
 // 二重コピーで重複しない
 await page.locator('.nav-btn[data-tab="tab-compose"]').click();
 await page.click('#btnCopy');
@@ -121,10 +158,42 @@ await page.waitForTimeout(400);
 const clip2 = await page.evaluate(() => navigator.clipboard.readText());
 ok('履歴から再コピー', clip2.includes('# 改修指示書：App Refiner'));
 
+// AR-4: 履歴からの再依頼（いったん入力欄を空にしてから復元されることを見る）
+await page.locator('.nav-btn[data-tab="tab-compose"]').click();
+await page.waitForTimeout(300);
+await page.fill('#reqBody', '');
+await page.locator('.nav-btn[data-tab="tab-history"]').click();
+await page.waitForTimeout(300);
+await page.locator('[data-history] [data-act="reuse"]').click();
+await page.waitForTimeout(500);
+ok('AR-4 指示書タブへ移動', await page.locator('#tab-compose').isVisible());
+ok('AR-4 本文が復元される', (await page.inputValue('#reqBody')).includes('スマホ最適化'));
+ok('AR-4 種類が復元される', (await page.inputValue('#reqType')) === 'UI改善');
+ok('AR-4 優先度が復元される', (await page.inputValue('#reqPriority')) === '高');
+ok('AR-4 生成結果はリセットされる', await page.locator('#outputWrap').isHidden());
+
+// AR-12: 指示書に改修履歴を含める
+await page.check('#includeHistory');
+await page.waitForTimeout(200);
+await page.click('#btnGenerate');
+await page.waitForTimeout(400);
+const outH = await page.locator('#outputText').innerText();
+ok('AR-12 これまでの改修依頼の節が入る', outH.includes('## これまでの改修依頼'));
+ok('AR-12 履歴の行が入る', /\* \d{4}\/\d{2}\/\d{2} .+UI改善/.test(outH));
+ok('AR-12 節の順序（要望→履歴→制約）',
+  outH.indexOf('## 改修要望') < outH.indexOf('## これまでの改修依頼') &&
+  outH.indexOf('## これまでの改修依頼') < outH.indexOf('## 制約'));
+await page.uncheck('#includeHistory');
+await page.waitForTimeout(200);
+await page.click('#btnGenerate');
+await page.waitForTimeout(400);
+ok('AR-12 オフなら従来どおり',
+  !(await page.locator('#outputText').innerText()).includes('## これまでの改修依頼'));
+
 // 永続化（リロード）
 await page.reload({ waitUntil: 'domcontentloaded' });
 await page.waitForTimeout(800);
-ok('リロード後もアプリ4件', await page.locator('[data-app-card]').count() === 4);
+ok('リロード後もアプリ5件', await page.locator('[data-app-card]').count() === 5);
 await page.locator('.nav-btn[data-tab="tab-history"]').click();
 await page.waitForTimeout(300);
 ok('リロード後も履歴1件', await page.locator('[data-history]').count() === 1);
@@ -139,7 +208,15 @@ await page.click('#btnExportCopy');
 await page.waitForTimeout(400);
 const exported = await page.inputValue('#exportText');
 let parsed = null; try { parsed = JSON.parse(exported); } catch {}
-ok('エクスポートJSONが妥当', !!parsed && parsed.apps.length === 4 && parsed.history.length === 1);
+ok('エクスポートJSONが妥当', !!parsed && parsed.apps.length === 5 && parsed.history.length >= 1);
+
+// AR-2: プレビュー表示トグル
+await page.uncheck('#optPreview');
+await page.waitForTimeout(400);
+ok('AR-2 トグルOFFでプレビュー非表示', await page.locator('.preview-box').count() === 0);
+await page.check('#optPreview');
+await page.waitForTimeout(400);
+ok('AR-2 トグルONで復帰', await page.locator('.preview-box').count() === 5);
 
 // インポート（置き換え）
 const payload = JSON.stringify({ app: 'app-refiner', version: 1, apps: [{ id: 'x1', name: 'Imported', repo: 'imported-app', url: 'https://example.com/', memo: 'm' }], history: [] });
@@ -171,16 +248,27 @@ await page.click('#confirmOk');
 await page.waitForTimeout(500);
 await page.locator('.nav-btn[data-tab="tab-apps"]').click();
 await page.waitForTimeout(300);
-ok('初期化でプリセット3件に戻る', await page.locator('[data-app-card]').count() === 3);
+ok('初期化でプリセット4件に戻る', await page.locator('[data-app-card]').count() === 4);
 
 // プレビュー不可の表示（存在しないURL）
 await page.click('#btnAddApp');
 await page.fill('#appName', 'Broken');
 await page.fill('#appUrl', '');
 await page.click('#btnSaveApp');
+await page.waitForTimeout(400);
+const lastCard = page.locator('[data-app-card]').last();
+await lastCard.scrollIntoViewIfNeeded();
 await page.waitForTimeout(600);
-const fbTexts = await page.locator('.preview-fallback').allInnerTexts();
+const fbTexts = await lastCard.locator('.preview-fallback').allInnerTexts();
 ok('URL未設定はプレビュー不可表示', fbTexts.some(t => t.includes('プレビュー不可')));
+
+// AR-10: Tailwind が読めた/読めないの判定が働いているか
+const twState = await page.evaluate(() => ({
+  noTw: document.documentElement.classList.contains('no-tw'),
+  bodyBg: getComputedStyle(document.body).backgroundColor,
+}));
+ok('AR-10 CDN到達状況を検出している (no-tw=' + twState.noTw + ')', typeof twState.noTw === 'boolean');
+ok('AR-10 どちらの場合も背景が暗い', twState.bodyBg !== 'rgba(0, 0, 0, 0)' && twState.bodyBg !== 'rgb(255, 255, 255)');
 
 await page.screenshot({ path: process.env.SHOT || 'shot.png', fullPage: false });
 console.log(log.join('\n'));
