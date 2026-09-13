@@ -10,8 +10,11 @@
 | AR-* | このリポジトリの `index.html` | [tasks/app-refiner.md](tasks/app-refiner.md) |
 | AS-* | App Studio MCP サーバー（別リポジトリ / Cloud Run） | [tasks/app-studio.md](tasks/app-studio.md) |
 
-この2系統は独立して進められます。ただし **AS-1（`publish_custom_html`）が入るまでは、
-App Refiner の改修は Claude Code からこのリポジトリへ直接コミットする運用**になります。
+全体構成と、なぜこの分担なのかは [ARCHITECTURE.md](ARCHITECTURE.md) にまとめてあります。
+
+**`publish_custom_html` が入るまで、App Refiner の改修は Claude Code から
+このリポジトリへ直接コミットする運用**です。App Refiner 自身が 86KB の単一HTMLアプリで、
+AppSchema では表現できないためです。
 
 ## ✅ 完了（2026-09-13 / PR #1 をマージ）
 
@@ -38,17 +41,16 @@ App Refiner の改修は Claude Code からこのリポジトリへ直接コミ�
 
 ## ⬜ App Studio 側 — 詳細は [tasks/app-studio.md](tasks/app-studio.md)
 
-| フェーズ | ID | 優先度 | 内容 |
-| --- | --- | --- | --- |
-| 入力 | AS-1 | 高 | 新規ツール `publish_custom_html`（任意の単一HTMLを直接デプロイ） |
-| 入力 | AS-5 | 高 | スキーマで表現できない仕様を、黙って劣化させずエラーにする |
-| 承認 | AS-3 | 高 | 承認通知が届かない問題の調査と承認待ち一覧ツール |
-| 承認 | AS-4 | 中 | 承認前に「何を公開しようとしているか」が分かるようにする |
-| 事後 | AS-6 | 中 | デプロイ後に公開URLの到達と内容一致を検証して返す |
-| 運用 | AS-2 | 高 | 稼働リビジョンの追従と、古いまま publish する際の警告 |
+**初版の AS-1〜AS-6 は誤りでした。** デフォルトブランチしか見ずに書いたためで、
+稼働ブランチ `claude/funny-hopper-e88v68` には540件のテストを持つ実装があり、
+大半は実装済みか意図的な保留でした。詳細と経緯はタスクファイルを参照。
 
-**まだ1件も App Studio へ投げていません。** AS-1 + AS-5 + AS-2 をまとめた依頼文が
-[tasks/app-studio.md](tasks/app-studio.md) の末尾にあります。
+残っているのは `publish_custom_html` の実装のみで、利用者の判断は
+2026-09-13 に出ています（[ARCHITECTURE.md](ARCHITECTURE.md) の「決定事項」）。
+
+**この作業は App Studio 側のチャットが担当します。** このセッションからは
+App Studio のコードを変更しません（当事者であること、並行作業中であること、
+二重実装を避けるため）。こちらの役割は生成物のレビューです。
 
 ## ⬜ 確認待ち
 

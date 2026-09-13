@@ -1,7 +1,13 @@
 # CLAUDE.md
 
-App Refiner（ブラッシュアップ司令塔）のリポジトリです。作業前に [docs/CONTEXT.md](docs/CONTEXT.md) と
-[docs/TODO.md](docs/TODO.md) を読んでください。
+App Refiner（ブラッシュアップ司令塔）のリポジトリです。作業前に
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)（全体構成と役割分担）、
+[docs/CONTEXT.md](docs/CONTEXT.md)（経緯）、
+[docs/TODO.md](docs/TODO.md)（残タスク）を読んでください。
+
+**App Studio のコードはこのセッションから変更しません。** 別チャットが当事者として
+並行作業中です。こちらの役割は App Refiner の開発と、生成物のレビューです
+（`.claude/skills/review-published-app/`）。
 
 ## 絶対に守る制約
 

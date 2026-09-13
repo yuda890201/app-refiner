@@ -58,6 +58,7 @@ Gemini や @App Studio、Claude Code に渡して実行します。
 
 ## ドキュメント
 
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — 全体構成・役割分担・セキュリティの考え方
 - [docs/CONTEXT.md](docs/CONTEXT.md) — ここまでの経緯と決定事項
 - [docs/TODO.md](docs/TODO.md) — 残作業の棚卸し（2系統のインデックス）
 - [docs/tasks/app-refiner.md](docs/tasks/app-refiner.md) — App Refiner 本体の残タスク（AR-*）
