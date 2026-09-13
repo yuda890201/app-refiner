@@ -34,10 +34,20 @@ node tests/smoke.mjs      # 34項目のスモークテスト。機能を追加�
                 "type": "機能追加|不具合修正|UI改善|リファクタ",
                 "priority": "高|中|低", "body": "", "text": "", "done": false }],
   "selectedId": "",
-  "draft": { "type": "", "priority": "", "body": "" },
-  "filter": "all|open|done"
+  "draft": { "type": "", "priority": "", "body": "", "includeHistory": false },
+  "filter": "all|open|done",
+  "settings": { "preview": true }
 }
 ```
 
 指示書のフォーマット（`buildInstruction()`）は下流の Gemini / @App Studio が読む契約なので、
 変更するときは README とこのファイルも合わせて更新すること。
+「## これまでの改修依頼」節は `draft.includeHistory` が true のときだけ付き、
+「## 改修要望」と「## 制約」の間に入る（既定はオフ＝従来どおりの出力）。
+
+## AR-10 のフォールバックCSSについて
+
+Tailwind CDN が読めたかを `detectTailwind()` が判定し、読めていなければ `html` に `.no-tw` を付ける。
+フォールバックのスタイルはすべて `.no-tw` 配下に書くこと（Tailwind が読めた場合は一切適用されない）。
+CDN の有無に関係なく必要な寸法（プレビュー枠の高さなど）は、Tailwind のクラスではなく
+自前の `<style>` に書くこと。
