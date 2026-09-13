@@ -19,12 +19,15 @@ App Refiner（ブラッシュアップ司令塔）のリポジトリです。作
 - **プレビュー iframe に `allow-same-origin` を付けない**。本アプリと同じ `yuda890201.github.io`
   オリジンに置かれるため、付けるとプレビュー先から本アプリのデータに触れられる。
 - **プレースホルダーで省略しない**（`// ここに既存の処理` のような書き方をしない）。
+- **CSP の meta を消さない・緩めない**。`connect-src 'none'` が外部送信を封じている。
+  新しい外部資源が要るときは、必要な directive だけを最小限で足し、
+  `tests/smoke.mjs` の CSP 検証（違反ログを数える方）が通ることを確認すること。
 
 ## 変更したら
 
 ```bash
 npx http-server . -p 8899 --silent
-node tests/smoke.mjs      # 66項目のスモークテスト。機能を追加したらここにも追記する
+node tests/smoke.mjs      # 77項目のスモークテスト。機能を追加したらここにも追記する
 ```
 
 ポートは環境変数 `PORT` で変えられる（`scripts/Invoke-AppRefinerCheck.ps1 -RunTests` が利用）。

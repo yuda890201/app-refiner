@@ -29,14 +29,13 @@ AppSchema では表現できないためです。
 
 ## ⬜ App Refiner 本体 — 詳細は [tasks/app-refiner.md](tasks/app-refiner.md)
 
-✅ AR-2 / AR-4 / AR-5 / AR-6 / AR-7 / AR-9 / AR-10 / AR-11 / AR-12 は実装済み
-（スモークテスト66項目・全PASS）。AR-1 の実機確認も完了。
+✅ AR-2〜AR-7 / AR-9〜AR-12 は実装済み（スモークテスト77項目・全PASS）。
+AR-1 の実機確認も完了。CSP も追加済み。
 
 残っているのは次の2件だけです。
 
 | ID | 優先度 | 内容 | 状態 |
 | --- | --- | --- | --- |
-| AR-3 | 中 | 初期登録アプリの見直し | 🔶 app-refiner を追加済み。実際に運用しているアプリ一覧をもらえれば反映できます |
 | AR-8 | 🔶 | PWA 化 | ⬜ 単一ファイル原則と衝突するため、原則を緩めるかの判断が必要 |
 
 ## ⬜ App Studio 側 — 詳細は [tasks/app-studio.md](tasks/app-studio.md)

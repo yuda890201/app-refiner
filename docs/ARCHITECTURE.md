@@ -102,6 +102,55 @@ publish_custom_html(repo, html_content, title, commit_message, allow_connect=[])
 空なら「外に一切通信しない」が保証だが、緩めた瞬間にその保証は消える。
 利用者がその変化に気づけないと、承認の意味が変わったことが見えない。
 
+## App Refiner は STRICT のままでは公開できない（2026-09-13 判明）
+
+`.claude/skills/review-published-app/` を App Refiner 自身に適用して分かったこと。
+
+App Studio の `STRICT_PUBLISH_CSP` は `script-src 'unsafe-inline'` のみで、
+**外部ホストを一切許可していません**。生成されるアプリが「自分の中にある資源だけ」で
+完結する前提だからです。
+
+一方 App Refiner は次を必要とします。
+
+| 必要なもの | STRICT での扱い |
+| --- | --- |
+| Tailwind CSS の CDN | `script-src` に外部ホストが無いため**読めない** |
+| Font Awesome の CDN | `style-src` / `font-src` も同様に**読めない** |
+| カードの iframe プレビュー | `frame-src 'none'` のため**表示できない** |
+
+つまり `publish_custom_html` ができても、**App Refiner は STRICT のままでは
+公開できません。** 必要な緩和は `connect-src` ではなく
+`script-src` / `style-src` / `font-src` / `frame-src` です。
+
+**App Studio へ伝えるべき修正**: 当初 `allow_connect=[]` という引数を提案しましたが、
+それだけでは足りません。緩和する対象を指定できる形（例: `allow={"script-src": [...],
+"frame-src": [...]}`）か、用途別の既定プリセットが要ります。
+
+なお App Refiner 自身には、必要最小限だけを許可した CSP を入れました（下記）。
+
+```
+default-src 'none'; script-src 'unsafe-inline' https://cdn.tailwindcss.com;
+style-src 'unsafe-inline' https://cdnjs.cloudflare.com; img-src data: blob:;
+font-src data: https://cdnjs.cloudflare.com; media-src data: blob:;
+connect-src 'none'; form-action 'none'; frame-src https:;
+object-src 'none'; base-uri 'none'
+```
+
+`connect-src 'none'` は維持しているので、外部への送信は封じられています。
+
+### 検証で分かったこと — 戻り値は嘘をつく
+
+CSP が効いているかを実際にブラウザで試したところ、
+
+| 手段 | JavaScript から見た結果 | 実際 |
+| --- | --- | --- |
+| `fetch` | 例外 | ブロック |
+| `sendBeacon` | **`true` を返す** | ブロック |
+| `new WebSocket` | **例外を投げない** | ブロック |
+
+**戻り値では判定できません。** ブラウザが拒否したかどうかは CSP の違反ログにしか
+現れません。テスト（`tests/smoke.mjs`）もログを見る形にしてあります。
+
 ## 作業の分担
 
 | 対象 | 担当 | 理由 |
