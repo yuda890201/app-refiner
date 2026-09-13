@@ -51,6 +51,7 @@ Gemini や @App Studio、Claude Code に渡して実行します。
 ## ドキュメント
 
 - [docs/CONTEXT.md](docs/CONTEXT.md) — ここまでの経緯と決定事項
-- [docs/TODO.md](docs/TODO.md) — 残作業の棚卸し
-- [docs/app-studio-feature-request.md](docs/app-studio-feature-request.md) — App Studio 側への改修要望（`publish_custom_html`）
+- [docs/TODO.md](docs/TODO.md) — 残作業の棚卸し（2系統のインデックス）
+- [docs/tasks/app-refiner.md](docs/tasks/app-refiner.md) — App Refiner 本体の残タスク（AR-*）
+- [docs/tasks/app-studio.md](docs/tasks/app-studio.md) — App Studio 側への改修要望（AS-*）
 - [tests/smoke.mjs](tests/smoke.mjs) — Playwright による動作確認スクリプト
